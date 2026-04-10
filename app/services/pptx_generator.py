@@ -3,6 +3,7 @@ from pptx import Presentation
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*([\w\.]+)\s*}}")
 
+
 def replace_text_placeholders(prs: Presentation, data: dict):
     for slide in prs.slides:
         for shape in slide.shapes:
