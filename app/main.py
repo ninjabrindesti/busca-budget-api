@@ -4,6 +4,8 @@ from typing import List, Optional
 from pptx import Presentation
 import uuid
 
+from app.services.pptx_generator import replace_text_placeholders
+
 
 app = FastAPI()
 
@@ -49,11 +51,14 @@ def health():
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
 
+    replace_text_placeholders(prs, payload.proposal.model_dump())
+
     slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(slide_layout)
 
-title = slide.shapes.title
-title.text = f"Proposta {payload.proposal.proposal_number}"
+    title = slide.shapes.title
+    if title:
+        title.text = f"Proposta {payload.proposal.proposal_number}"
 
     filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
