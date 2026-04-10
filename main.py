@@ -50,7 +50,7 @@ def health():
 def generate_proposal(payload: GenerateRequest):
 
     # Criar apresentação
-    prs = Presentation()
+prs = Presentation("templates/template_ninja.pptx")
 
     # Slide simples (layout 0 = título)
     slide_layout = prs.slide_layouts[0]
