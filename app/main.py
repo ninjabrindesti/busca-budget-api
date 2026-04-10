@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from pptx import Presentation
@@ -65,7 +66,8 @@ def generate_proposal(payload: GenerateRequest):
 
     prs.save(filepath)
 
-    return {
-        "status": "success",
-        "file_generated": filename
-    }
+    return FileResponse(
+        path=filepath,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
