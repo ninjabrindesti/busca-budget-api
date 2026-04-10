@@ -54,13 +54,6 @@ def generate_proposal(payload: GenerateRequest):
 
     replace_text_placeholders(prs, payload.proposal.model_dump())
 
-    slide_layout = prs.slide_layouts[0]
-    slide = prs.slides.add_slide(slide_layout)
-
-    title = slide.shapes.title
-    if title:
-        title.text = f"Proposta {payload.proposal.proposal_number}"
-
     filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
 
