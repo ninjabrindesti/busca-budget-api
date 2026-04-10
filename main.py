@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from pptx import Presentation
+import uuid
+import os
 
 
 app = FastAPI()
@@ -45,9 +48,28 @@ def health():
 
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
+
+    # Criar apresentação
+    prs = Presentation()
+
+    # Slide simples (layout 0 = título)
+    slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(slide_layout)
+
+    title = slide.shapes.title
+    subtitle = slide.placeholders[1]
+
+    title.text = f"Proposta {payload.proposal.proposal_number}"
+    subtitle.text = f"Cliente: {payload.proposal.client_name}"
+
+    # Nome do arquivo
+    filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
+    filepath = f"/tmp/{filename}"
+
+    # Salvar arquivo
+    prs.save(filepath)
+
     return {
         "status": "success",
-        "message": "Payload validado com sucesso",
-        "sections_count": len(payload.sections),
-        "items_count": sum(len(section.items) for section in payload.sections),
+        "file_generated": filename
     }
