@@ -8,7 +8,6 @@ import uuid
 from app.services.pptx_generator import (
     replace_text_placeholders_on_slide,
     replace_named_images_on_slide,
-    duplicate_slide,
 )
 
 
@@ -56,13 +55,13 @@ def health():
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
 
-    ITEM_SLIDE_INDEX = 8
-    BUDGET_SLIDE_INDEX = 9
-
     section = payload.sections[0]
+    item = section.items[0]
+
+    item_total = item.quantity * item.unit_price
     freight_value = section.freight_value or 0
 
-    seller_base_data = {
+    data = {
         "proposal_number": payload.proposal.proposal_number,
         "client_name": payload.proposal.client_name,
         "payment_method": payload.proposal.payment_method,
@@ -72,55 +71,26 @@ def generate_proposal(payload: GenerateRequest):
         "seller_phone": "(11) 99999-9999",
         "seller_email": "joao@empresa.com",
         "seller_description": "Teste vendedor",
-        "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
-    }
-
-    # Mantém o slide 10 em teste simples por enquanto
-    first_item = section.items[0]
-    first_item_total = first_item.quantity * first_item.unit_price
-
-    budget_data = {
-        **seller_base_data,
-        "item_name": first_item.item_name,
-        "item_subtitle": first_item.item_subtitle,
-        "item_index": str(first_item.item_index),
-        "item_display_index": str(first_item.item_index + 1),
-        "item_description": first_item.item_description,
-        "item_code": first_item.item_code,
-        "quantity": str(first_item.quantity),
-        "unit_price": f"{first_item.unit_price:.2f}",
-        "item_total": f"{first_item_total:.2f}",
-        "section_total": f"{first_item_total:.2f}",
+        "item_name": item.item_name,
+        "item_subtitle": item.item_subtitle,
+        "item_index": str(item.item_index),
+        "item_display_index": str(item.item_index + 1),
+        "item_description": item.item_description,
+        "item_code": item.item_code,
+        "quantity": str(item.quantity),
+        "unit_price": f"{item.unit_price:.2f}",
+        "item_total": f"{item_total:.2f}",
+        "section_total": f"{item_total:.2f}",
         "freight": f"{freight_value:.2f}",
-        "item_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Item",
+        "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
+        "item_image_url": item.item_image_url,
     }
 
-    replace_text_placeholders_on_slide(prs.slides[BUDGET_SLIDE_INDEX], budget_data)
-    replace_named_images_on_slide(prs.slides[BUDGET_SLIDE_INDEX], budget_data)
+    replace_text_placeholders_on_slide(prs.slides[8], data)
+    replace_named_images_on_slide(prs.slides[8], data)
 
-    # Duplica a página 9 para cada item
-    for item in section.items:
-        new_item_slide = duplicate_slide(prs, ITEM_SLIDE_INDEX)
-        item_total = item.quantity * item.unit_price
-
-        item_data = {
-            **seller_base_data,
-            "item_name": item.item_name,
-            "item_subtitle": item.item_subtitle,
-            "item_index": str(item.item_index),
-            "item_display_index": str(item.item_index + 1),
-            "item_description": item.item_description,
-            "item_code": item.item_code,
-            "quantity": str(item.quantity),
-            "unit_price": f"{item.unit_price:.2f}",
-            "item_total": f"{item_total:.2f}",
-            "section_total": f"{item_total:.2f}",
-            "freight": f"{freight_value:.2f}",
-            "item_image_url": item.item_image_url,
-        }
-
-        replace_text_placeholders_on_slide(new_item_slide, item_data)
-        replace_named_images_on_slide(new_item_slide, item_data)
+    replace_text_placeholders_on_slide(prs.slides[9], data)
+    replace_named_images_on_slide(prs.slides[9], data)
 
     filename = f"proposta_teste_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
