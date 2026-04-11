@@ -6,8 +6,8 @@ from pptx import Presentation
 import uuid
 
 from app.services.pptx_generator import (
-    replace_text_placeholders,
-    replace_named_images,
+    replace_text_placeholders_on_slide,
+    replace_named_images_on_slide,
     duplicate_slide,
 )
 
@@ -47,6 +47,9 @@ class GenerateRequest(BaseModel):
     sections: List[Section] = Field(min_length=1)
 
 
+app = FastAPI()
+
+
 @app.get("/")
 def health():
     return {"status": "ok"}
@@ -55,12 +58,17 @@ def health():
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
+
+    # Slides-base do item e orçamento no template
     item_slide_indices = [4, 5]
 
     first_section = payload.sections[0]
     freight_value = first_section.freight_value or 0
 
     for item in first_section.items:
+        item_slide = duplicate_slide(prs, item_slide_indices[0])
+        budget_slide = duplicate_slide(prs, item_slide_indices[1])
+
         item_total = item.quantity * item.unit_price
 
         data = {
@@ -92,8 +100,11 @@ def generate_proposal(payload: GenerateRequest):
             "item_image_url": item.item_image_url,
         }
 
-        replace_text_placeholders(prs, data)
-        replace_named_images(prs, data)
+        replace_text_placeholders_on_slide(item_slide, data)
+        replace_text_placeholders_on_slide(budget_slide, data)
+
+        replace_named_images_on_slide(item_slide, data)
+        replace_named_images_on_slide(budget_slide, data)
 
     filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
