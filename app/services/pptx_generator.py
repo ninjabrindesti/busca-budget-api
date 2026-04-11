@@ -1,4 +1,7 @@
 import re
+import os
+import uuid
+import requests
 from pptx import Presentation
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*([\w\.]+)\s*}}")
@@ -41,3 +44,61 @@ def replace_text_placeholders(prs: Presentation, data: dict):
 
             if hasattr(shape, "text_frame") and shape.text_frame is not None:
                 _replace_in_text_frame(shape.text_frame, data)
+
+
+def _download_image(url: str) -> str | None:
+    if not url:
+        return None
+
+    response = requests.get(url, timeout=20)
+    response.raise_for_status()
+
+    content_type = response.headers.get("content-type", "").lower()
+
+    extension = ".png"
+    if "jpeg" in content_type or "jpg" in content_type:
+        extension = ".jpg"
+    elif "webp" in content_type:
+        extension = ".webp"
+
+    file_path = f"/tmp/{uuid.uuid4().hex}{extension}"
+
+    with open(file_path, "wb") as f:
+        f.write(response.content)
+
+    return file_path
+
+
+def replace_named_images(prs: Presentation, data: dict):
+    image_mappings = {
+        "seller_image": data.get("seller_image_url"),
+        "item_image": data.get("item_image_url"),
+    }
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            shape_name = getattr(shape, "name", "")
+
+            if shape_name not in image_mappings:
+                continue
+
+            image_url = image_mappings[shape_name]
+            if not image_url:
+                continue
+
+            image_path = _download_image(image_url)
+            if not image_path:
+                continue
+
+            left = shape.left
+            top = shape.top
+            width = shape.width
+            height = shape.height
+
+            sp = shape._element
+            sp.getparent().remove(sp)
+
+            slide.shapes.add_picture(image_path, left, top, width=width, height=height)
+
+            if os.path.exists(image_path):
+                os.remove(image_path)
