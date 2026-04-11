@@ -51,6 +51,7 @@ def health():
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
+    item_slide_indices = [4, 5]
 
     first_section = payload.sections[0]
     freight_value = first_section.freight_value or 0
