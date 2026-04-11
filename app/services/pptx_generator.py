@@ -16,8 +16,12 @@ def replace_text_placeholders(prs: Presentation, data: dict):
 
             def repl(match):
                 key = match.group(1)
-                value = data.get(key, "")
-                return str(value) if value is not None else ""
+                value = data.get(key)
+
+                if value is None or value == "":
+                    return match.group(0)
+
+                return str(value)
 
             new_text = PLACEHOLDER_PATTERN.sub(repl, full_text)
 
