@@ -86,6 +86,8 @@ def generate_proposal(payload: GenerateRequest):
         "item_total": f"{item_total:.2f}",
         "section_total": f"{item_total:.2f}",
         "freight": f"{freight_value:.2f}",
+        "seller_image_url": "https://static.wikia.nocookie.net/cartoons/images/e/eb/Gumball.jpg",
+        "item_image_url": "https://static.wikia.nocookie.net/cartoons/images/e/eb/Gumball.jpg",
     }
 
     replace_text_placeholders(prs, data)
