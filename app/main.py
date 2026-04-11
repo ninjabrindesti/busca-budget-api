@@ -72,13 +72,13 @@ def generate_proposal(payload: GenerateRequest):
             "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
             "antecipar necessidades e ser um parceiro no sucesso deles."
         ),
-"item_name": first_item.item_name,
-"item_subtitle": first_item.item_subtitle,
-"item_index": str(first_item.item_index),
-"item_description": first_item.item_description,
-"item_code": first_item.item_code,
-"quantity": str(first_item.quantity),
-"unit_price": f"{first_item.unit_price:.2f},
+        "item_name": first_item.item_name,
+        "item_subtitle": first_item.item_subtitle,
+        "item_index": str(first_item.item_index),
+        "item_description": first_item.item_description,
+        "item_code": first_item.item_code,
+        "quantity": str(first_item.quantity),
+        "unit_price": f"{first_item.unit_price:.2f}",
     }
 
     replace_text_placeholders(prs, data)
