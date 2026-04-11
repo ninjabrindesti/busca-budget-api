@@ -47,9 +47,6 @@ class GenerateRequest(BaseModel):
     sections: List[Section] = Field(min_length=1)
 
 
-app = FastAPI()
-
-
 @app.get("/")
 def health():
     return {"status": "ok"}
@@ -59,52 +56,80 @@ def health():
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
 
-    # Slides-base do item e orçamento no template
-    item_slide_indices = [4, 5]
+    # Ajuste estes índices se a ordem real do template for diferente.
+    # Índices começam em 0.
+    ITEM_SLIDE_INDEX = 8       # página 9
+    BUDGET_SLIDE_INDEX = 9     # página 10
 
-    first_section = payload.sections[0]
-    freight_value = first_section.freight_value or 0
+    seller_base_data = {
+        "proposal_number": payload.proposal.proposal_number,
+        "client_name": payload.proposal.client_name,
+        "payment_method": payload.proposal.payment_method,
+        "delivery_date": payload.proposal.delivery_date,
+        "notes": payload.proposal.notes,
+        "seller_name": "João Victor Ferrigno",
+        "seller_phone": "(11) 99999-9999",
+        "seller_email": "joao@empresa.com",
+        "seller_description": (
+            "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
+            "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
+            "antecipar necessidades e ser um parceiro no sucesso deles."
+        ),
+        "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
+    }
 
-    for item in first_section.items:
-        item_slide = duplicate_slide(prs, item_slide_indices[0])
-        budget_slide = duplicate_slide(prs, item_slide_indices[1])
+    for section in payload.sections:
+        section_total_value = sum(item.quantity * item.unit_price for item in section.items)
+        freight_value = section.freight_value or 0
 
-        item_total = item.quantity * item.unit_price
+        # 1 slide 9 por item
+        for item in section.items:
+            item_slide = duplicate_slide(prs, ITEM_SLIDE_INDEX)
+            item_total = item.quantity * item.unit_price
 
-        data = {
-            "proposal_number": payload.proposal.proposal_number,
-            "client_name": payload.proposal.client_name,
-            "payment_method": payload.proposal.payment_method,
-            "delivery_date": payload.proposal.delivery_date,
-            "notes": payload.proposal.notes,
-            "seller_name": "João Victor Ferrigno",
-            "seller_phone": "(11) 99999-9999",
-            "seller_email": "joao@empresa.com",
-            "seller_description": (
-                "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
-                "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
-                "antecipar necessidades e ser um parceiro no sucesso deles."
-            ),
-            "item_name": item.item_name,
-            "item_subtitle": item.item_subtitle,
-            "item_index": str(item.item_index),
-            "item_display_index": str(item.item_index + 1),
-            "item_description": item.item_description,
-            "item_code": item.item_code,
-            "quantity": str(item.quantity),
-            "unit_price": f"{item.unit_price:.2f}",
-            "item_total": f"{item_total:.2f}",
-            "section_total": f"{item_total:.2f}",
+            item_data = {
+                **seller_base_data,
+                "item_name": item.item_name,
+                "item_subtitle": item.item_subtitle,
+                "item_index": str(item.item_index),
+                "item_display_index": str(item.item_index + 1),
+                "item_description": item.item_description,
+                "item_code": item.item_code,
+                "quantity": str(item.quantity),
+                "unit_price": f"{item.unit_price:.2f}",
+                "item_total": f"{item_total:.2f}",
+                "section_total": f"{section_total_value:.2f}",
+                "freight": f"{freight_value:.2f}",
+                "item_image_url": item.item_image_url,
+            }
+
+            replace_text_placeholders_on_slide(item_slide, item_data)
+            replace_named_images_on_slide(item_slide, item_data)
+
+        # 1 slide 10 consolidado por orçamento
+        budget_slide = duplicate_slide(prs, BUDGET_SLIDE_INDEX)
+
+        first_item = section.items[0]
+        first_item_total = first_item.quantity * first_item.unit_price
+
+        budget_data = {
+            **seller_base_data,
+            "item_name": first_item.item_name,
+            "item_subtitle": first_item.item_subtitle,
+            "item_index": str(first_item.item_index),
+            "item_display_index": str(first_item.item_index + 1),
+            "item_description": first_item.item_description,
+            "item_code": first_item.item_code,
+            "quantity": str(first_item.quantity),
+            "unit_price": f"{first_item.unit_price:.2f}",
+            "item_total": f"{first_item_total:.2f}",
+            "section_total": f"{section_total_value:.2f}",
             "freight": f"{freight_value:.2f}",
-            "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
-            "item_image_url": item.item_image_url,
+            "item_image_url": first_item.item_image_url,
         }
 
-        replace_text_placeholders_on_slide(item_slide, data)
-        replace_text_placeholders_on_slide(budget_slide, data)
-
-        replace_named_images_on_slide(item_slide, data)
-        replace_named_images_on_slide(budget_slide, data)
+        replace_text_placeholders_on_slide(budget_slide, budget_data)
+        replace_named_images_on_slide(budget_slide, budget_data)
 
     filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
