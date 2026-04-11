@@ -55,6 +55,9 @@ def generate_proposal(payload: GenerateRequest):
     first_section = payload.sections[0]
     first_item = first_section.items[0]
 
+    item_total = first_item.quantity * first_item.unit_price
+    freight_value = first_section.freight_value or 0
+
     data = {
         "proposal_number": payload.proposal.proposal_number,
         "client_name": payload.proposal.client_name,
@@ -75,10 +78,14 @@ def generate_proposal(payload: GenerateRequest):
         "item_name": first_item.item_name,
         "item_subtitle": first_item.item_subtitle,
         "item_index": str(first_item.item_index),
+        "item_display_index": str(first_item.item_index + 1),
         "item_description": first_item.item_description,
         "item_code": first_item.item_code,
         "quantity": str(first_item.quantity),
         "unit_price": f"{first_item.unit_price:.2f}",
+        "item_total": f"{item_total:.2f}",
+        "section_total": f"{item_total:.2f}",
+        "freight": f"{freight_value:.2f}",
     }
 
     replace_text_placeholders(prs, data)
