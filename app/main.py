@@ -56,10 +56,11 @@ def health():
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
 
-    # Ajuste estes índices se a ordem real do template for diferente.
-    # Índices começam em 0.
-    ITEM_SLIDE_INDEX = 8       # página 9
-    BUDGET_SLIDE_INDEX = 9     # página 10
+    # Índices internos do PowerPoint começam em 0
+    # Página 9 = índice 8
+    # Página 10 = índice 9
+    ITEM_SLIDE_INDEX = 8
+    BUDGET_SLIDE_INDEX = 9
 
     seller_base_data = {
         "proposal_number": payload.proposal.proposal_number,
@@ -82,7 +83,7 @@ def generate_proposal(payload: GenerateRequest):
         section_total_value = sum(item.quantity * item.unit_price for item in section.items)
         freight_value = section.freight_value or 0
 
-        # 1 slide 9 por item
+        # 1 slide de item por item
         for item in section.items:
             item_slide = duplicate_slide(prs, ITEM_SLIDE_INDEX)
             item_total = item.quantity * item.unit_price
@@ -106,7 +107,7 @@ def generate_proposal(payload: GenerateRequest):
             replace_text_placeholders_on_slide(item_slide, item_data)
             replace_named_images_on_slide(item_slide, item_data)
 
-        # 1 slide 10 consolidado por orçamento
+        # 1 slide de orçamento consolidado por orçamento
         budget_slide = duplicate_slide(prs, BUDGET_SLIDE_INDEX)
 
         first_item = section.items[0]
