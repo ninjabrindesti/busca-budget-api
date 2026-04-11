@@ -7,6 +7,7 @@ import uuid
 
 from app.services.pptx_generator import replace_text_placeholders, replace_named_images
 
+
 app = FastAPI()
 
 
@@ -52,9 +53,6 @@ def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
 
     first_section = payload.sections[0]
-    first_item = first_section.items[0]
-
-    item_total = first_item.quantity * first_item.unit_price
     freight_value = first_section.freight_value or 0
 
     data = {
@@ -69,21 +67,8 @@ def generate_proposal(payload: GenerateRequest):
         "seller_description": (
             "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
             "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
-            "antecipar necessidades e ser um parceiro no sucesso deles. "
-            "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
-            "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
             "antecipar necessidades e ser um parceiro no sucesso deles."
         ),
-        "item_name": first_item.item_name,
-        "item_subtitle": first_item.item_subtitle,
-        "item_index": str(first_item.item_index),
-        "item_display_index": str(first_item.item_index + 1),
-        "item_description": first_item.item_description,
-        "item_code": first_item.item_code,
-        "quantity": str(first_item.quantity),
-        "unit_price": f"{first_item.unit_price:.2f}",
-        "item_total": f"{item_total:.2f}",
-        "section_total": f"{item_total:.2f}",
         "freight": f"{freight_value:.2f}",
         "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
         "item_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Item",
