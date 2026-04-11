@@ -62,10 +62,12 @@ def generate_proposal(payload: GenerateRequest):
         "delivery_date": payload.proposal.delivery_date,
         "notes": payload.proposal.notes,
 
-        "seller_name": "João Vendedor",
+        "seller_name": "João Victor Ferrigno",
         "seller_phone": "(11) 99999-9999",
         "seller_email": "joao@empresa.com",
-        "seller_description": "Especialista em brindes corporativos",
+        "seller_description": "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, antecipar necessidades e ser um parceiro no sucesso deles.
+Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, antecipar necessidades e ser um parceiro no sucesso deles.
+",
 
         "item_name": first_item.item_name,
         "item_subtitle": first_item.item_subtitle,
