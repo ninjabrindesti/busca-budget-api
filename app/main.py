@@ -5,8 +5,7 @@ from typing import List, Optional
 from pptx import Presentation
 import uuid
 
-from app.services.pptx_generator import replace_text_placeholders
-
+from app.services.pptx_generator import replace_text_placeholders, replace_named_images
 
 app = FastAPI()
 
@@ -91,6 +90,7 @@ def generate_proposal(payload: GenerateRequest):
     }
 
     replace_text_placeholders(prs, data)
+    replace_named_images(prs, data)
 
     filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
