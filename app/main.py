@@ -5,7 +5,11 @@ from typing import List, Optional
 from pptx import Presentation
 import uuid
 
-from app.services.pptx_generator import replace_text_placeholders, replace_named_images
+from app.services.pptx_generator import (
+    replace_text_placeholders,
+    replace_named_images,
+    duplicate_slide,
+)
 
 
 app = FastAPI()
