@@ -54,6 +54,7 @@ def health():
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
+    bloco_prs = Presentation("templates/template_bloco_itens.pptx")
 
     section = payload.sections[0]
     item = section.items[0]
