@@ -53,41 +53,42 @@ def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
 
     first_section = payload.sections[0]
-    for item in first_section.items:
-    item_total = item.quantity * item.unit_price
     freight_value = first_section.freight_value or 0
 
-    data = {
-        "proposal_number": payload.proposal.proposal_number,
-        "client_name": payload.proposal.client_name,
-        "payment_method": payload.proposal.payment_method,
-        "delivery_date": payload.proposal.delivery_date,
-        "notes": payload.proposal.notes,
-        "seller_name": "João Victor Ferrigno",
-        "seller_phone": "(11) 99999-9999",
-        "seller_email": "joao@empresa.com",
-        "seller_description": (
-            "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
-            "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
-            "antecipar necessidades e ser um parceiro no sucesso deles."
-        ),
-        "item_name": item.item_name,
-        "item_subtitle": item.item_subtitle,
-        "item_index": str(item.item_index),
-        "item_display_index": str(item.item_index + 1),
-        "item_description": item.item_description,
-        "item_code": item.item_code,
-        "quantity": str(item.quantity),
-        "unit_price": f"{item.unit_price:.2f}",
-        "item_total": f"{item_total:.2f}",
-        "section_total": f"{item_total:.2f}",
-        "freight": f"{freight_value:.2f}",
-        "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
-        "item_image_url": item.item_image_url,
-    }
+    for item in first_section.items:
+        item_total = item.quantity * item.unit_price
 
-    replace_text_placeholders(prs, data)
-    replace_named_images(prs, data)
+        data = {
+            "proposal_number": payload.proposal.proposal_number,
+            "client_name": payload.proposal.client_name,
+            "payment_method": payload.proposal.payment_method,
+            "delivery_date": payload.proposal.delivery_date,
+            "notes": payload.proposal.notes,
+            "seller_name": "João Victor Ferrigno",
+            "seller_phone": "(11) 99999-9999",
+            "seller_email": "joao@empresa.com",
+            "seller_description": (
+                "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
+                "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
+                "antecipar necessidades e ser um parceiro no sucesso deles."
+            ),
+            "item_name": item.item_name,
+            "item_subtitle": item.item_subtitle,
+            "item_index": str(item.item_index),
+            "item_display_index": str(item.item_index + 1),
+            "item_description": item.item_description,
+            "item_code": item.item_code,
+            "quantity": str(item.quantity),
+            "unit_price": f"{item.unit_price:.2f}",
+            "item_total": f"{item_total:.2f}",
+            "section_total": f"{item_total:.2f}",
+            "freight": f"{freight_value:.2f}",
+            "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
+            "item_image_url": item.item_image_url,
+        }
+
+        replace_text_placeholders(prs, data)
+        replace_named_images(prs, data)
 
     filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
