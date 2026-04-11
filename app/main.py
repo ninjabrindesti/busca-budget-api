@@ -8,6 +8,7 @@ import uuid
 from app.services.pptx_generator import (
     replace_text_placeholders_on_slide,
     replace_named_images_on_slide,
+    copy_slide_from_presentation,
 )
 
 
