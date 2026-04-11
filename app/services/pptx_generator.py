@@ -1,6 +1,8 @@
-import re
 import os
+import re
 import uuid
+from copy import deepcopy
+
 import requests
 from pptx import Presentation
 
@@ -34,16 +36,20 @@ def _replace_in_text_frame(text_frame, data: dict):
 
 def replace_text_placeholders(prs: Presentation, data: dict):
     for slide in prs.slides:
-        for shape in slide.shapes:
-            if getattr(shape, "has_table", False):
-                for row in shape.table.rows:
-                    for cell in row.cells:
-                        if cell.text_frame is not None:
-                            _replace_in_text_frame(cell.text_frame, data)
-                continue
+        replace_text_placeholders_on_slide(slide, data)
 
-            if hasattr(shape, "text_frame") and shape.text_frame is not None:
-                _replace_in_text_frame(shape.text_frame, data)
+
+def replace_text_placeholders_on_slide(slide, data: dict):
+    for shape in slide.shapes:
+        if getattr(shape, "has_table", False):
+            for row in shape.table.rows:
+                for cell in row.cells:
+                    if cell.text_frame is not None:
+                        _replace_in_text_frame(cell.text_frame, data)
+            continue
+
+        if hasattr(shape, "text_frame") and shape.text_frame is not None:
+            _replace_in_text_frame(shape.text_frame, data)
 
 
 def _download_image(url: str) -> str | None:
@@ -58,8 +64,6 @@ def _download_image(url: str) -> str | None:
     extension = ".png"
     if "jpeg" in content_type or "jpg" in content_type:
         extension = ".jpg"
-    elif "webp" in content_type:
-        extension = ".webp"
 
     file_path = f"/tmp/{uuid.uuid4().hex}{extension}"
 
@@ -70,37 +74,42 @@ def _download_image(url: str) -> str | None:
 
 
 def replace_named_images(prs: Presentation, data: dict):
+    for slide in prs.slides:
+        replace_named_images_on_slide(slide, data)
+
+
+def replace_named_images_on_slide(slide, data: dict):
     image_mappings = {
         "seller_image": data.get("seller_image_url"),
         "item_image": data.get("item_image_url"),
     }
 
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            shape_name = getattr(shape, "name", "")
+    shapes_to_replace = []
 
-            if shape_name not in image_mappings:
-                continue
+    for shape in slide.shapes:
+        shape_name = getattr(shape, "name", "")
 
-            image_url = image_mappings[shape_name]
-            if not image_url:
-                continue
+        if shape_name in image_mappings and image_mappings[shape_name]:
+            shapes_to_replace.append((shape, image_mappings[shape_name]))
 
-            image_path = _download_image(image_url)
-            if not image_path:
-                continue
+    for shape, image_url in shapes_to_replace:
+        image_path = _download_image(image_url)
+        if not image_path:
+            continue
 
-            left = shape.left
-            top = shape.top
-            width = shape.width
-            height = shape.height
+        left = shape.left
+        top = shape.top
+        width = shape.width
+        height = shape.height
 
-            sp = shape._element
-            sp.getparent().remove(sp)
+        sp = shape._element
+        sp.getparent().remove(sp)
 
-            slide.shapes.add_picture(image_path, left, top, width=width, height=height)
+        slide.shapes.add_picture(image_path, left, top, width=width, height=height)
 
-            from copy import deepcopy
+        if os.path.exists(image_path):
+            os.remove(image_path)
+
 
 def duplicate_slide(prs, slide_index: int):
     source_slide = prs.slides[slide_index]
@@ -112,6 +121,3 @@ def duplicate_slide(prs, slide_index: int):
         new_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
 
     return new_slide
-
-            if os.path.exists(image_path):
-                os.remove(image_path)
