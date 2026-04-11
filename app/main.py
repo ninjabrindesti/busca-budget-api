@@ -83,7 +83,7 @@ def generate_proposal(payload: GenerateRequest):
         "section_total": f"{item_total:.2f}",
         "freight": f"{freight_value:.2f}",
         "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
-        "item_image_url": item.item_image_url,
+        "item_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Item",
     }
 
     replace_text_placeholders_on_slide(prs.slides[8], data)
