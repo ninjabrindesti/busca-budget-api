@@ -10,20 +10,25 @@ def replace_text_placeholders(prs: Presentation, data: dict):
             if not hasattr(shape, "text_frame") or shape.text_frame is None:
                 continue
 
-            full_text = shape.text
-            if not full_text:
-                continue
+            for paragraph in shape.text_frame.paragraphs:
+                original_text = "".join(run.text for run in paragraph.runs)
 
-            def repl(match):
-                key = match.group(1)
-                value = data.get(key)
+                if not original_text:
+                    continue
 
-                if value is None or value == "":
-                    return match.group(0)
+                def repl(match):
+                    key = match.group(1)
+                    value = data.get(key)
 
-                return str(value)
+                    if value is None or value == "":
+                        return match.group(0)
 
-            new_text = PLACEHOLDER_PATTERN.sub(repl, full_text)
+                    return str(value)
 
-            if new_text != full_text:
-                shape.text = new_text
+                new_text = PLACEHOLDER_PATTERN.sub(repl, original_text)
+
+                if new_text != original_text and len(paragraph.runs) > 0:
+                    paragraph.runs[0].text = new_text
+
+                    for run in paragraph.runs[1:]:
+                        run.text = ""
