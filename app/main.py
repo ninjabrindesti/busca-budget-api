@@ -61,17 +61,20 @@ def generate_proposal(payload: GenerateRequest):
         "payment_method": payload.proposal.payment_method,
         "delivery_date": payload.proposal.delivery_date,
         "notes": payload.proposal.notes,
-
         "seller_name": "João Victor Ferrigno",
         "seller_phone": "(11) 99999-9999",
         "seller_email": "joao@empresa.com",
-        "seller_description": "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, antecipar necessidades e ser um parceiro no sucesso deles.
-Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, antecipar necessidades e ser um parceiro no sucesso deles.
-",
-
+        "seller_description": (
+            "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
+            "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
+            "antecipar necessidades e ser um parceiro no sucesso deles. "
+            "Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vida das pessoas. "
+            "Acredito que, mais do que atender, meu papel é entender profundamente a jornada do cliente, "
+            "antecipar necessidades e ser um parceiro no sucesso deles."
+        ),
         "item_name": first_item.item_name,
         "item_subtitle": first_item.item_subtitle,
-        "item_index": str(first_item.item_index)
+        "item_index": str(first_item.item_index),
     }
 
     replace_text_placeholders(prs, data)
@@ -84,5 +87,5 @@ Sou apaixonado por construir conexões genuínas e gerar impacto positivo na vid
     return FileResponse(
         path=filepath,
         filename=filename,
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
