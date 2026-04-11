@@ -53,7 +53,12 @@ def replace_text_placeholders_on_slide(slide, data: dict):
 
 
 def _download_image(url: str) -> str | None:
-    if not url:
+    if not url or not isinstance(url, str):
+        return None
+
+    url = url.strip()
+
+    if not (url.startswith("http://") or url.startswith("https://")):
         return None
 
     response = requests.get(url, timeout=20)
