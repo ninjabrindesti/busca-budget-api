@@ -100,5 +100,18 @@ def replace_named_images(prs: Presentation, data: dict):
 
             slide.shapes.add_picture(image_path, left, top, width=width, height=height)
 
+            from copy import deepcopy
+
+def duplicate_slide(prs, slide_index: int):
+    source_slide = prs.slides[slide_index]
+    blank_layout = prs.slide_layouts[6]
+    new_slide = prs.slides.add_slide(blank_layout)
+
+    for shape in source_slide.shapes:
+        new_el = deepcopy(shape._element)
+        new_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
+
+    return new_slide
+
             if os.path.exists(image_path):
                 os.remove(image_path)
