@@ -126,3 +126,14 @@ def duplicate_slide(prs, slide_index: int):
         new_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
 
     return new_slide
+
+def copy_slide_from_presentation(source_prs, source_slide_index: int, target_prs):
+    source_slide = source_prs.slides[source_slide_index]
+    blank_layout = target_prs.slide_layouts[6]
+    new_slide = target_prs.slides.add_slide(blank_layout)
+
+    for shape in source_slide.shapes:
+        new_el = deepcopy(shape._element)
+        new_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
+
+    return new_slide
