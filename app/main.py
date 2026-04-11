@@ -52,7 +52,27 @@ def health():
 def generate_proposal(payload: GenerateRequest):
     prs = Presentation("templates/template_ninja.pptx")
 
-    replace_text_placeholders(prs, payload.proposal.model_dump())
+    first_section = payload.sections[0]
+    first_item = first_section.items[0]
+
+    data = {
+        "proposal_number": payload.proposal.proposal_number,
+        "client_name": payload.proposal.client_name,
+        "payment_method": payload.proposal.payment_method,
+        "delivery_date": payload.proposal.delivery_date,
+        "notes": payload.proposal.notes,
+
+        "seller_name": "João Vendedor",
+        "seller_phone": "(11) 99999-9999",
+        "seller_email": "joao@empresa.com",
+        "seller_description": "Especialista em brindes corporativos",
+
+        "item_name": first_item.item_name,
+        "item_subtitle": first_item.item_subtitle,
+        "item_index": str(first_item.item_index)
+    }
+
+    replace_text_placeholders(prs, data)
 
     filename = f"proposta_{payload.proposal.proposal_number}_{str(uuid.uuid4())[:4]}.pptx"
     filepath = f"/tmp/{filename}"
