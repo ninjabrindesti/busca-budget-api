@@ -293,12 +293,28 @@ def generate_proposal(payload: GenerateRequest):
                 detail=f"Slide de resumo não encontrado. Índice: {slide_cursor}",
             )
 
-        summary_slide = prs.slides[slide_cursor]
-        summary_data = _build_summary_data(payload.proposal, section)
-        _expand_summary_table(summary_slide, section)
-        replace_text_placeholders_on_slide(summary_slide, summary_data)
-        replace_named_images_on_slide(summary_slide, summary_data)
-        slide_cursor += 1
+summary_slide = prs.slides[slide_cursor]
+
+summary_data = {
+    "proposal_number": payload.proposal.proposal_number,
+    "client_name": payload.proposal.client_name,
+    "payment_method": payload.proposal.payment_method,
+    "delivery_date": payload.proposal.delivery_date,
+    "notes": payload.proposal.notes,
+    "seller_name": payload.proposal.seller_name,
+    "seller_phone": payload.proposal.seller_phone,
+    "seller_email": payload.proposal.seller_email,
+    "seller_description": payload.proposal.seller_description,
+    "seller_image_url": payload.proposal.seller_image_url or "",
+    "section_total": _format_currency(sum(i.quantity * i.unit_price for i in section.items)),
+    "freight": _format_currency(section.freight_value or 0.0),
+    "freight_label": section.freight_label,
+}
+
+_expand_summary_table(summary_slide, section)
+replace_text_placeholders_on_slide(summary_slide, summary_data)
+replace_named_images_on_slide(summary_slide, summary_data)
+slide_cursor += 1
 
     out_buf = io.BytesIO()
     prs.save(out_buf)
