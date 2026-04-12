@@ -58,11 +58,22 @@ def _download_image(url: str) -> str | None:
 
     url = url.strip()
 
+    # Bloqueia placeholders comuns
+    if url.lower() in {"string", "null", "none"}:
+        return None
+
+    # Validação mínima de URL
+    if " " in url:
+        return None
+
     if not (url.startswith("http://") or url.startswith("https://")):
         return None
 
-    response = requests.get(url, timeout=20)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except Exception:
+        return None
 
     content_type = response.headers.get("content-type", "").lower()
 
