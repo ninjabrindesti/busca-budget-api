@@ -10,6 +10,7 @@ from app.services.pptx_generator import (
     replace_text_placeholders_on_slide,
     replace_named_images_on_slide,
 )
+from app.services.pptx_com import duplicate_slide_in_file
 
 app = FastAPI()
 
