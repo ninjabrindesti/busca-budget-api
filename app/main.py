@@ -214,11 +214,14 @@ def generate_proposal(payload: GenerateRequest):
     # PASSO 1: Duplicar slides de item e resumo conforme quantidade de seções
     # -----------------------------------------------------------------------
 
-    total_item_slides = sum(len(s.items) for s in payload.sections)
-    total_summary_slides = len(payload.sections)
+total_item_slides = sum(len(s.items) for s in payload.sections)
+total_summary_slides = len(payload.sections)
 
-    item_copies = total_item_slides - 1
-    summary_copies = total_summary_slides - 1
+if total_item_slides <= 0:
+    raise HTTPException(status_code=400, detail="Nenhum item enviado.")
+
+item_copies = max(total_item_slides - 1, 0)
+summary_copies = max(total_summary_slides - 1, 0)
 
     # Duplica slides de item (clona o slide 9 original)
     for _ in range(item_copies):
