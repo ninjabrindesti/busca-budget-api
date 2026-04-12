@@ -33,8 +33,6 @@ from app.services.pptx_generator import (
 )
 from app.services.slide_duplicator import duplicate_slide_in_pptx
 
-print("início do main.py")
-
 
 # ---------------------------------------------------------------------------
 # Constantes do template
@@ -190,11 +188,6 @@ def _build_data(proposal: Proposal, item: Item, section: Section) -> dict:
     }
 
 
-def _build_summary_data(proposal: Proposal, section: Section) -> dict:
-    first_item = section.items[0]
-    return _build_data(proposal, first_item, section)
-
-
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -243,6 +236,7 @@ def generate_proposal(payload: GenerateRequest):
             copies=1,
             insert_after_index=summary_original_index,
         )
+
     # -----------------------------------------------------------------------
     # PASSO 2: Reordenar slides para intercalar item/resumo por seção
     # -----------------------------------------------------------------------
@@ -295,28 +289,29 @@ def generate_proposal(payload: GenerateRequest):
                 detail=f"Slide de resumo não encontrado. Índice: {slide_cursor}",
             )
 
-summary_slide = prs.slides[slide_cursor]
+        summary_slide = prs.slides[slide_cursor]
+        summary_data = {
+            "proposal_number": payload.proposal.proposal_number,
+            "client_name": payload.proposal.client_name,
+            "payment_method": payload.proposal.payment_method,
+            "delivery_date": payload.proposal.delivery_date,
+            "notes": payload.proposal.notes,
+            "seller_name": payload.proposal.seller_name,
+            "seller_phone": payload.proposal.seller_phone,
+            "seller_email": payload.proposal.seller_email,
+            "seller_description": payload.proposal.seller_description,
+            "seller_image_url": payload.proposal.seller_image_url or "",
+            "section_total": _format_currency(
+                sum(i.quantity * i.unit_price for i in section.items)
+            ),
+            "freight": _format_currency(section.freight_value or 0.0),
+            "freight_label": section.freight_label,
+        }
 
-summary_data = {
-    "proposal_number": payload.proposal.proposal_number,
-    "client_name": payload.proposal.client_name,
-    "payment_method": payload.proposal.payment_method,
-    "delivery_date": payload.proposal.delivery_date,
-    "notes": payload.proposal.notes,
-    "seller_name": payload.proposal.seller_name,
-    "seller_phone": payload.proposal.seller_phone,
-    "seller_email": payload.proposal.seller_email,
-    "seller_description": payload.proposal.seller_description,
-    "seller_image_url": payload.proposal.seller_image_url or "",
-    "section_total": _format_currency(sum(i.quantity * i.unit_price for i in section.items)),
-    "freight": _format_currency(section.freight_value or 0.0),
-    "freight_label": section.freight_label,
-}
-
-_expand_summary_table(summary_slide, section)
-replace_text_placeholders_on_slide(summary_slide, summary_data)
-replace_named_images_on_slide(summary_slide, summary_data)
-slide_cursor += 1
+        _expand_summary_table(summary_slide, section)
+        replace_text_placeholders_on_slide(summary_slide, summary_data)
+        replace_named_images_on_slide(summary_slide, summary_data)
+        slide_cursor += 1
 
     out_buf = io.BytesIO()
     prs.save(out_buf)
@@ -338,7 +333,6 @@ slide_cursor += 1
 # ---------------------------------------------------------------------------
 
 _NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
-_NS_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 
 def _reorder_slides(
@@ -430,7 +424,11 @@ def _expand_summary_table(slide, section: Section):
         template_row_idx = None
         for i, row in enumerate(rows):
             row_text = " ".join(cell.text for cell in row.cells)
-            if "{{item_" in row_text or "{{quantity}}" in row_text or "{{unit_price}}" in row_text:
+            if (
+                "{{item_" in row_text
+                or "{{quantity}}" in row_text
+                or "{{unit_price}}" in row_text
+            ):
                 template_row_idx = i
                 break
 
@@ -440,14 +438,18 @@ def _expand_summary_table(slide, section: Section):
         template_row_el = rows[template_row_idx]._tr
         parent = template_row_el.getparent()
 
-        # remove todas as linhas abaixo do template original que tenham placeholders de item
+        # Remove linhas placeholder adicionais abaixo da linha modelo
         current_rows = list(table.rows)
         for row in current_rows[template_row_idx + 1:]:
             row_text = " ".join(cell.text for cell in row.cells)
-            if "{{item_" in row_text or "{{quantity}}" in row_text or "{{unit_price}}" in row_text:
+            if (
+                "{{item_" in row_text
+                or "{{quantity}}" in row_text
+                or "{{unit_price}}" in row_text
+            ):
                 parent.remove(row._tr)
 
-        # primeira linha usa o próprio template; as demais são clones dele
+        # Primeira linha usa o template; demais são clones
         row_elements = [template_row_el]
         for _ in section.items[1:]:
             new_row_el = _deepcopy(template_row_el)
@@ -468,35 +470,12 @@ def _expand_summary_table(slide, section: Section):
                 "{{item_total}}": _format_currency(item_total),
             }
 
-            for tc in row_el.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t"):
+            for tc in row_el.iter(
+                "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
+            ):
                 if not tc.text:
                     continue
                 for placeholder, value in replacements.items():
                     tc.text = tc.text.replace(placeholder, value)
 
         break
-
-        src_row_el = rows[item_row_idx]._tr
-
-        for extra_item in section.items[1:]:
-            new_row_el = _deepcopy(src_row_el)
-
-            for tc in new_row_el.iter(
-                "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
-            ):
-                if tc.text:
-                    tc.text = (
-                        tc.text
-                        .replace(first_item.item_code, extra_item.item_code)
-                        .replace(str(first_item.item_index + 1), str(extra_item.item_index + 1))
-                        .replace(first_item.item_name, extra_item.item_name)
-                        .replace(first_item.item_description, extra_item.item_description)
-                    )
-
-            src_row_el.addnext(new_row_el)
-            src_row_el = new_row_el
-
-        break
-
-if __name__ == "__main__":
-    print("main importado com sucesso")
