@@ -55,71 +55,72 @@ def health():
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
     template_path = "templates/template_ninja.pptx"
+    working_path = f"/tmp/proposta_work_{uuid.uuid4().hex}.pptx"
 
     if not os.path.exists(template_path):
-        raise HTTPException(status_code=500, detail="Template principal não encontrado.")
-
-    prs = Presentation(template_path)
-
-    # REGRA TEMPORÁRIA:
-    # slide 9 (índice 8) = slide de item
-    # slide 10 (índice 9) = slide consolidado
-    #
-    # Para esta versão corrigida do main, vamos preencher apenas o primeiro slide de item já existente.
-    # Nada de duplicação. Nada de cópia entre apresentações.
-
-    ITEM_SLIDE_INDEX = 8  # slide 9 no PowerPoint
-
-    if len(prs.slides) <= ITEM_SLIDE_INDEX:
-        raise HTTPException(
-            status_code=500,
-            detail="O template não possui o slide de item esperado na posição 9."
-        )
+        raise HTTPException(status_code=500, detail="Template não encontrado.")
 
     section = payload.sections[0]
-    item = section.items[0]
+    item_count = len(section.items)
 
-    item_total = item.quantity * item.unit_price
-    freight_value = section.freight_value or 0
+    # slide 9 = modelo de item
+    # se já existe 1 slide base e você quer N itens,
+    # precisa duplicar N-1 vezes
+    copies_needed = max(0, item_count - 1)
 
-    data = {
-        "proposal_number": payload.proposal.proposal_number,
-        "client_name": payload.proposal.client_name,
-        "payment_method": payload.proposal.payment_method,
-        "delivery_date": payload.proposal.delivery_date,
-        "notes": payload.proposal.notes,
-        "seller_name": "João Victor Ferrigno",
-        "seller_phone": "(11) 99999-9999",
-        "seller_email": "joao@empresa.com",
-        "seller_description": "Teste vendedor",
-        "item_name": item.item_name,
-        "item_subtitle": item.item_subtitle,
-        "item_index": str(item.item_index),
-        "item_display_index": str(item.item_index + 1),
-        "item_description": item.item_description,
-        "item_code": item.item_code,
-        "quantity": str(item.quantity),
-        "unit_price": f"{item.unit_price:.2f}",
-        "item_total": f"{item_total:.2f}",
-        "section_total": f"{item_total:.2f}",
-        "freight": f"{freight_value:.2f}",
-        "freight_label": section.freight_label,
-        "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
-        "item_image_url": item.item_image_url,
-    }
+    duplicate_slide_in_file(
+        input_path=template_path,
+        output_path=working_path,
+        source_slide_index=9,
+        copies=copies_needed,
+    )
 
-    item_slide = prs.slides[ITEM_SLIDE_INDEX]
+    prs = Presentation(working_path)
 
-    replace_text_placeholders_on_slide(item_slide, data)
-    replace_named_images_on_slide(item_slide, data)
+    ITEM_SLIDE_START_INDEX = 8  # base 0 => slide 9
 
-    filename = f"proposta_teste_{str(uuid.uuid4())[:8]}.pptx"
-    filepath = f"/tmp/{filename}"
+    for i, item in enumerate(section.items):
+        slide = prs.slides[ITEM_SLIDE_START_INDEX + i]
 
-    prs.save(filepath)
+        item_total = item.quantity * item.unit_price
+        freight_value = section.freight_value or 0
+
+        data = {
+            "proposal_number": payload.proposal.proposal_number,
+            "client_name": payload.proposal.client_name,
+            "payment_method": payload.proposal.payment_method,
+            "delivery_date": payload.proposal.delivery_date,
+            "notes": payload.proposal.notes,
+            "seller_name": "João Victor Ferrigno",
+            "seller_phone": "(11) 99999-9999",
+            "seller_email": "joao@empresa.com",
+            "seller_description": "Teste vendedor",
+            "item_name": item.item_name,
+            "item_subtitle": item.item_subtitle,
+            "item_index": str(item.item_index),
+            "item_display_index": str(item.item_index + 1),
+            "item_description": item.item_description,
+            "item_code": item.item_code,
+            "quantity": str(item.quantity),
+            "unit_price": f"{item.unit_price:.2f}",
+            "item_total": f"{item_total:.2f}",
+            "section_total": f"{item_total:.2f}",
+            "freight": f"{freight_value:.2f}",
+            "freight_label": section.freight_label,
+            "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
+            "item_image_url": item.item_image_url,
+        }
+
+        replace_text_placeholders_on_slide(slide, data)
+        replace_named_images_on_slide(slide, data)
+
+    filename = f"proposta_teste_{uuid.uuid4().hex[:8]}.pptx"
+    final_path = f"/tmp/{filename}"
+
+    prs.save(final_path)
 
     return FileResponse(
-        path=filepath,
+        path=final_path,
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
