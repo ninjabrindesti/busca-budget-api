@@ -16,10 +16,9 @@ import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy as _deepcopy
 from typing import List, Optional
+from urllib.parse import urlparse
 
 import httpx
-import _io as _io
-import re as _re
 import zipfile as _zipfile
 from lxml import etree as _etree
 
@@ -40,11 +39,37 @@ from app.services.slide_duplicator import duplicate_slide_in_pptx
 # ---------------------------------------------------------------------------
 
 TEMPLATE_PATH = "templates/template_ninja.pptx"
-TEMPLATE_URL  = os.getenv("TEMPLATE_URL")
+TEMPLATE_URL = os.getenv("TEMPLATE_URL")
 
 # Índices 0-based no template original
-ITEM_SLIDE_INDEX    = 8   # slide 9  → template de item individual
-SUMMARY_SLIDE_INDEX = 9   # slide 10 → template de resumo/orçamento
+ITEM_SLIDE_INDEX = 8       # slide 9  → template de item individual
+SUMMARY_SLIDE_INDEX = 9    # slide 10 → template de resumo/orçamento
+
+
+# ---------------------------------------------------------------------------
+# Helpers de URL / template
+# ---------------------------------------------------------------------------
+
+def _is_valid_http_url(url: Optional[str]) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+
+    url = url.strip()
+    if " " in url:
+        return False
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    if not parsed.netloc:
+        return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -54,11 +79,25 @@ SUMMARY_SLIDE_INDEX = 9   # slide 10 → template de resumo/orçamento
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs("templates", exist_ok=True)
-    if not os.path.exists(TEMPLATE_PATH) and TEMPLATE_URL:
-        r = httpx.get(TEMPLATE_URL, timeout=30)
-        r.raise_for_status()
+
+    if not os.path.exists(TEMPLATE_PATH):
+        if not _is_valid_http_url(TEMPLATE_URL):
+            raise RuntimeError(
+                "Template não encontrado localmente e TEMPLATE_URL está ausente ou inválida."
+            )
+
+        try:
+            with httpx.Client(timeout=30, follow_redirects=True) as client:
+                response = client.get(TEMPLATE_URL.strip())
+                response.raise_for_status()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Falha ao baixar o template em TEMPLATE_URL: {exc}"
+            ) from exc
+
         with open(TEMPLATE_PATH, "wb") as f:
-            f.write(r.content)
+            f.write(response.content)
+
     yield
 
 
@@ -114,43 +153,42 @@ def _format_currency(value: float) -> str:
 
 
 def _build_data(proposal: Proposal, item: Item, section: Section) -> dict:
-    item_total    = item.quantity * item.unit_price
+    item_total = item.quantity * item.unit_price
     freight_value = section.freight_value or 0.0
     section_total = sum(i.quantity * i.unit_price for i in section.items)
 
     return {
         # Proposta
-        "proposal_number":    proposal.proposal_number,
-        "client_name":        proposal.client_name,
-        "payment_method":     proposal.payment_method,
-        "delivery_date":      proposal.delivery_date,
-        "notes":              proposal.notes,
+        "proposal_number": proposal.proposal_number,
+        "client_name": proposal.client_name,
+        "payment_method": proposal.payment_method,
+        "delivery_date": proposal.delivery_date,
+        "notes": proposal.notes,
         # Vendedor
-        "seller_name":        proposal.seller_name,
-        "seller_phone":       proposal.seller_phone,
-        "seller_email":       proposal.seller_email,
+        "seller_name": proposal.seller_name,
+        "seller_phone": proposal.seller_phone,
+        "seller_email": proposal.seller_email,
         "seller_description": proposal.seller_description,
-        "seller_image_url":   proposal.seller_image_url or "",
+        "seller_image_url": proposal.seller_image_url or "",
         # Item
-        "item_name":          item.item_name,
-        "item_subtitle":      item.item_subtitle,
-        "item_index":         str(item.item_index),
+        "item_name": item.item_name,
+        "item_subtitle": item.item_subtitle,
+        "item_index": str(item.item_index),
         "item_display_index": str(item.item_index + 1),
-        "item_description":   item.item_description,
-        "item_code":          item.item_code,
-        "quantity":           str(item.quantity),
-        "unit_price":         _format_currency(item.unit_price),
-        "item_total":         _format_currency(item_total),
-        "item_image_url":     item.item_image_url,
+        "item_description": item.item_description,
+        "item_code": item.item_code,
+        "quantity": str(item.quantity),
+        "unit_price": _format_currency(item.unit_price),
+        "item_total": _format_currency(item_total),
+        "item_image_url": item.item_image_url,
         # Seção
-        "section_total":      _format_currency(section_total),
-        "freight":            _format_currency(freight_value),
-        "freight_label":      section.freight_label,
+        "section_total": _format_currency(section_total),
+        "freight": _format_currency(freight_value),
+        "freight_label": section.freight_label,
     }
 
 
 def _build_summary_data(proposal: Proposal, section: Section) -> dict:
-    """Dados para o slide de resumo (slide 10). Usa o primeiro item como base."""
     first_item = section.items[0]
     return _build_data(proposal, first_item, section)
 
@@ -176,10 +214,10 @@ def generate_proposal(payload: GenerateRequest):
     # PASSO 1: Duplicar slides de item e resumo conforme quantidade de seções
     # -----------------------------------------------------------------------
 
-    total_item_slides    = sum(len(s.items) for s in payload.sections)
+    total_item_slides = sum(len(s.items) for s in payload.sections)
     total_summary_slides = len(payload.sections)
 
-    item_copies    = total_item_slides - 1
+    item_copies = total_item_slides - 1
     summary_copies = total_summary_slides - 1
 
     # Duplica slides de item (clona o slide 9 original)
@@ -221,11 +259,11 @@ def generate_proposal(payload: GenerateRequest):
     # Slide do vendedor (slide 4 = índice 3)
     seller_slide = prs.slides[3]
     seller_data = {
-        "seller_name":        payload.proposal.seller_name,
-        "seller_phone":       payload.proposal.seller_phone,
-        "seller_email":       payload.proposal.seller_email,
+        "seller_name": payload.proposal.seller_name,
+        "seller_phone": payload.proposal.seller_phone,
+        "seller_email": payload.proposal.seller_email,
         "seller_description": payload.proposal.seller_description,
-        "seller_image_url":   payload.proposal.seller_image_url or "",
+        "seller_image_url": payload.proposal.seller_image_url or "",
     }
     replace_text_placeholders_on_slide(seller_slide, seller_data)
     replace_named_images_on_slide(seller_slide, seller_data)
@@ -234,33 +272,32 @@ def generate_proposal(payload: GenerateRequest):
     slide_cursor = ITEM_SLIDE_INDEX
 
     for section in payload.sections:
-        # Slides de item desta seção
         for item in section.items:
             if slide_cursor >= len(prs.slides):
                 raise HTTPException(
                     status_code=500,
                     detail=f"Slide de item não encontrado. Índice: {slide_cursor}",
                 )
+
             slide = prs.slides[slide_cursor]
-            data  = _build_data(payload.proposal, item, section)
+            data = _build_data(payload.proposal, item, section)
             replace_text_placeholders_on_slide(slide, data)
             replace_named_images_on_slide(slide, data)
             slide_cursor += 1
 
-        # Slide de resumo desta seção
         if slide_cursor >= len(prs.slides):
             raise HTTPException(
                 status_code=500,
                 detail=f"Slide de resumo não encontrado. Índice: {slide_cursor}",
             )
+
         summary_slide = prs.slides[slide_cursor]
-        summary_data  = _build_summary_data(payload.proposal, section)
+        summary_data = _build_summary_data(payload.proposal, section)
         _expand_summary_table(summary_slide, section)
         replace_text_placeholders_on_slide(summary_slide, summary_data)
         replace_named_images_on_slide(summary_slide, summary_data)
         slide_cursor += 1
 
-    # Salva em memória e retorna
     out_buf = io.BytesIO()
     prs.save(out_buf)
     out_buf.seek(0)
@@ -280,8 +317,7 @@ def generate_proposal(payload: GenerateRequest):
 # Reordenação de slides
 # ---------------------------------------------------------------------------
 
-_NS_P   = "http://schemas.openxmlformats.org/presentationml/2006/main"
-_NS_R   = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
 _NS_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 
@@ -300,55 +336,54 @@ def _reorder_slides(
     buf: dict[str, bytes] = {}
 
     with _zipfile.ZipFile(io.BytesIO(pptx_bytes), "r") as zf:
-        prs_root  = _etree.fromstring(zf.read("ppt/presentation.xml"))
-        rels_root = _etree.fromstring(zf.read("ppt/_rels/presentation.xml.rels"))
-
-        rid_to_target = {
-            rel.get("Id"): rel.get("Target")
-            for rel in rels_root.findall(f"{{{_NS_REL}}}Relationship")
-        }
+        prs_root = _etree.fromstring(zf.read("ppt/presentation.xml"))
 
         sld_id_lst = prs_root.find(f".//{{{_NS_P}}}sldIdLst")
         sld_id_els = list(sld_id_lst)
 
-        # Fatias da lista de slides
-        fixed_before   = sld_id_els[:ITEM_SLIDE_INDEX]
-        item_slides    = sld_id_els[ITEM_SLIDE_INDEX : ITEM_SLIDE_INDEX + total_item_slides]
+        fixed_before = sld_id_els[:ITEM_SLIDE_INDEX]
+        item_slides = sld_id_els[ITEM_SLIDE_INDEX: ITEM_SLIDE_INDEX + total_item_slides]
         summary_slides = sld_id_els[
-            ITEM_SLIDE_INDEX + total_item_slides :
+            ITEM_SLIDE_INDEX + total_item_slides:
             ITEM_SLIDE_INDEX + total_item_slides + total_summary_slides
         ]
-        fixed_after = sld_id_els[ITEM_SLIDE_INDEX + total_item_slides + total_summary_slides:]
+        fixed_after = sld_id_els[
+            ITEM_SLIDE_INDEX + total_item_slides + total_summary_slides:
+        ]
 
-        # Reconstrói ordem intercalada: [items_sec1, resumo_sec1, items_sec2, resumo_sec2, ...]
         new_order = list(fixed_before)
-        item_ptr    = 0
+        item_ptr = 0
         summary_ptr = 0
+
         for section in sections:
             for _ in range(len(section.items)):
                 new_order.append(item_slides[item_ptr])
                 item_ptr += 1
+
             new_order.append(summary_slides[summary_ptr])
             summary_ptr += 1
+
         new_order.extend(fixed_after)
 
-        # Substitui sldIdLst
         for el in list(sld_id_lst):
             sld_id_lst.remove(el)
         for el in new_order:
             sld_id_lst.append(el)
 
         buf["ppt/presentation.xml"] = _etree.tostring(
-            prs_root, xml_declaration=True, encoding="utf-8", standalone=True
+            prs_root,
+            xml_declaration=True,
+            encoding="utf-8",
+            standalone=True,
         )
 
-        # Monta ZIP de saída
         out = io.BytesIO()
         with _zipfile.ZipFile(out, "w", _zipfile.ZIP_DEFLATED) as out_zf:
             written = set()
             for name, data in buf.items():
                 out_zf.writestr(name, data)
                 written.add(name)
+
             for name in zf.namelist():
                 if name not in written:
                     out_zf.writestr(name, zf.read(name))
@@ -372,9 +407,8 @@ def _expand_summary_table(slide, section: Section):
             continue
 
         table = shape.table
-        rows  = list(table.rows)
+        rows = list(table.rows)
 
-        # Identifica a linha de dados do primeiro item
         item_row_idx = None
         for i, row in enumerate(rows):
             row_text = " ".join(cell.text for cell in row.cells)
@@ -400,13 +434,13 @@ def _expand_summary_table(slide, section: Section):
                 if tc.text:
                     tc.text = (
                         tc.text
-                        .replace(first_item.item_code,           extra_item.item_code)
+                        .replace(first_item.item_code, extra_item.item_code)
                         .replace(str(first_item.item_index + 1), str(extra_item.item_index + 1))
-                        .replace(first_item.item_name,           extra_item.item_name)
-                        .replace(first_item.item_description,    extra_item.item_description)
+                        .replace(first_item.item_name, extra_item.item_name)
+                        .replace(first_item.item_description, extra_item.item_description)
                     )
 
             src_row_el.addnext(new_row_el)
             src_row_el = new_row_el
 
-        break  # só processa a primeira tabela do slide
+        break
