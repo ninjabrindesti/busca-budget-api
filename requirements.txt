@@ -1,6 +1,7 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-pptx
+lxml
 requests
 supabase
 PyJWT

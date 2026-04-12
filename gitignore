@@ -1,8 +1,11 @@
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
+.env
 .venv/
-env/
 venv/
-/tmp/
+*.egg-info/
+dist/
+build/
+.DS_Store
+/tmp/*.pptx
