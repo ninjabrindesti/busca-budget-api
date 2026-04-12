@@ -1,16 +1,15 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from pptx import Presentation
 import uuid
+import os
 
 from app.services.pptx_generator import (
     replace_text_placeholders_on_slide,
     replace_named_images_on_slide,
-    copy_slide_from_presentation,
 )
-
 
 app = FastAPI()
 
@@ -54,10 +53,27 @@ def health():
 
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
-    prs = Presentation("templates/template_ninja.pptx")
-    bloco_prs = Presentation("templates/template_bloco_itens.pptx")
+    template_path = "templates/template_ninja.pptx"
 
-    new_slide = copy_slide_from_presentation(bloco_prs, 0, prs)
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=500, detail="Template principal não encontrado.")
+
+    prs = Presentation(template_path)
+
+    # REGRA TEMPORÁRIA:
+    # slide 9 (índice 8) = slide de item
+    # slide 10 (índice 9) = slide consolidado
+    #
+    # Para esta versão corrigida do main, vamos preencher apenas o primeiro slide de item já existente.
+    # Nada de duplicação. Nada de cópia entre apresentações.
+
+    ITEM_SLIDE_INDEX = 8  # slide 9 no PowerPoint
+
+    if len(prs.slides) <= ITEM_SLIDE_INDEX:
+        raise HTTPException(
+            status_code=500,
+            detail="O template não possui o slide de item esperado na posição 9."
+        )
 
     section = payload.sections[0]
     item = section.items[0]
@@ -86,14 +102,17 @@ def generate_proposal(payload: GenerateRequest):
         "item_total": f"{item_total:.2f}",
         "section_total": f"{item_total:.2f}",
         "freight": f"{freight_value:.2f}",
+        "freight_label": section.freight_label,
         "seller_image_url": "https://dummyimage.com/400x400/cccccc/000000.png&text=Seller",
         "item_image_url": item.item_image_url,
     }
 
-    replace_text_placeholders_on_slide(new_slide, data)
-    replace_named_images_on_slide(new_slide, data)
+    item_slide = prs.slides[ITEM_SLIDE_INDEX]
 
-    filename = f"proposta_teste_{str(uuid.uuid4())[:4]}.pptx"
+    replace_text_placeholders_on_slide(item_slide, data)
+    replace_named_images_on_slide(item_slide, data)
+
+    filename = f"proposta_teste_{str(uuid.uuid4())[:8]}.pptx"
     filepath = f"/tmp/{filename}"
 
     prs.save(filepath)
