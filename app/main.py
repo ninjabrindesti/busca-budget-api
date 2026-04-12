@@ -56,16 +56,27 @@ def health():
 def generate_proposal(payload: GenerateRequest):
     template_path = "templates/template_ninja.pptx"
     working_path = f"/tmp/proposta_work_{uuid.uuid4().hex}.pptx"
+    final_filename = f"proposta_{uuid.uuid4().hex[:8]}.pptx"
+    final_path = f"/tmp/{final_filename}"
 
     if not os.path.exists(template_path):
         raise HTTPException(status_code=500, detail="Template não encontrado.")
 
+    if not payload.sections:
+        raise HTTPException(status_code=400, detail="Nenhum orçamento enviado.")
+
+    # VERSAO ATUAL:
+    # trabalha com 1 section por vez
+    # duplica o slide 9 conforme a quantidade de itens da primeira section
     section = payload.sections[0]
+
+    if not section.items:
+        raise HTTPException(status_code=400, detail="A seção precisa ter ao menos 1 item.")
+
     item_count = len(section.items)
 
-    # slide 9 = modelo de item
-    # se já existe 1 slide base e você quer N itens,
-    # precisa duplicar N-1 vezes
+    # Slide 9 no PowerPoint = índice 9 no COM (1-based)
+    # Se já existe 1 slide base e precisamos de N itens, duplicamos N-1 vezes
     copies_needed = max(0, item_count - 1)
 
     duplicate_slide_in_file(
@@ -75,12 +86,22 @@ def generate_proposal(payload: GenerateRequest):
         copies=copies_needed,
     )
 
+    # Só abre com python-pptx DEPOIS da duplicação
     prs = Presentation(working_path)
 
-    ITEM_SLIDE_START_INDEX = 8  # base 0 => slide 9
+    # Slide 9 no PowerPoint = índice 8 no python-pptx (0-based)
+    ITEM_SLIDE_START_INDEX = 8
 
     for i, item in enumerate(section.items):
-        slide = prs.slides[ITEM_SLIDE_START_INDEX + i]
+        slide_index = ITEM_SLIDE_START_INDEX + i
+
+        if slide_index >= len(prs.slides):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Slide esperado não encontrado após duplicação. Índice: {slide_index}"
+            )
+
+        slide = prs.slides[slide_index]
 
         item_total = item.quantity * item.unit_price
         freight_value = section.freight_value or 0
@@ -114,13 +135,10 @@ def generate_proposal(payload: GenerateRequest):
         replace_text_placeholders_on_slide(slide, data)
         replace_named_images_on_slide(slide, data)
 
-    filename = f"proposta_teste_{uuid.uuid4().hex[:8]}.pptx"
-    final_path = f"/tmp/{filename}"
-
     prs.save(final_path)
 
     return FileResponse(
         path=final_path,
-        filename=filename,
+        filename=final_filename,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
