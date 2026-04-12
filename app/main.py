@@ -214,14 +214,14 @@ def generate_proposal(payload: GenerateRequest):
     # PASSO 1: Duplicar slides de item e resumo conforme quantidade de seções
     # -----------------------------------------------------------------------
 
-total_item_slides = sum(len(s.items) for s in payload.sections)
-total_summary_slides = len(payload.sections)
+    total_item_slides = sum(len(s.items) for s in payload.sections)
+    total_summary_slides = len(payload.sections)
 
-if total_item_slides <= 0:
-    raise HTTPException(status_code=400, detail="Nenhum item enviado.")
+    if total_item_slides <= 0:
+        raise HTTPException(status_code=400, detail="Nenhum item enviado.")
 
-item_copies = max(total_item_slides - 1, 0)
-summary_copies = max(total_summary_slides - 1, 0)
+    item_copies = max(total_item_slides - 1, 0)
+    summary_copies = max(total_summary_slides - 1, 0)
 
     # Duplica slides de item (clona o slide 9 original)
     for _ in range(item_copies):
@@ -232,7 +232,7 @@ summary_copies = max(total_summary_slides - 1, 0)
             insert_after_index=ITEM_SLIDE_INDEX,
         )
 
-    # Duplica slides de resumo (clona o slide 10 original, agora deslocado)
+    # Duplica slides de resumo
     summary_original_index = ITEM_SLIDE_INDEX + total_item_slides
     for _ in range(summary_copies):
         pptx_bytes = duplicate_slide_in_pptx(
@@ -241,7 +241,6 @@ summary_copies = max(total_summary_slides - 1, 0)
             copies=1,
             insert_after_index=summary_original_index,
         )
-
     # -----------------------------------------------------------------------
     # PASSO 2: Reordenar slides para intercalar item/resumo por seção
     # -----------------------------------------------------------------------
