@@ -33,6 +33,8 @@ from app.services.pptx_generator import (
 )
 from app.services.slide_duplicator import duplicate_slide_in_pptx
 
+print("início do main.py")
+
 
 # ---------------------------------------------------------------------------
 # Constantes do template
@@ -495,3 +497,6 @@ def _expand_summary_table(slide, section: Section):
             src_row_el = new_row_el
 
         break
+
+if __name__ == "__main__":
+    print("main importado com sucesso")
