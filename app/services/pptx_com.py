@@ -27,7 +27,6 @@ def duplicate_slide_in_file(
             WithWindow=False,
         )
 
-        # COM usa índice começando em 1
         for _ in range(copies):
             presentation.Slides(source_slide_index).Duplicate()
 
