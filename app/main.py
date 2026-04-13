@@ -134,22 +134,28 @@ def _format_currency(value: float) -> str:
     return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _build_global_data(proposal: Proposal) -> dict:
+    return {
+        "proposal_number": proposal.proposal_number,
+        "client_name": proposal.client_name,
+        "seller_name": proposal.seller_name,
+        "seller_phone": proposal.seller_phone,
+        "seller_email": proposal.seller_email,
+        "seller_description": proposal.seller_description,
+        "seller_image_url": proposal.seller_image_url or "",
+        "payment_method": proposal.payment_method,
+        "delivery_date": proposal.delivery_date,
+        "notes": proposal.notes,
+    }
+
+
 def _build_data(proposal: Proposal, item: Item, section: Section) -> dict:
     item_total = item.quantity * item.unit_price
     freight_value = section.freight_value or 0.0
     section_total = sum(i.quantity * i.unit_price for i in section.items)
 
     return {
-        "proposal_number": proposal.proposal_number,
-        "client_name": proposal.client_name,
-        "payment_method": proposal.payment_method,
-        "delivery_date": proposal.delivery_date,
-        "notes": proposal.notes,
-        "seller_name": proposal.seller_name,
-        "seller_phone": proposal.seller_phone,
-        "seller_email": proposal.seller_email,
-        "seller_description": proposal.seller_description,
-        "seller_image_url": proposal.seller_image_url or "",
+        **_build_global_data(proposal),
         "item_name": item.item_name,
         "item_subtitle": item.item_subtitle,
         "item_index": str(item.item_index),
@@ -158,7 +164,7 @@ def _build_data(proposal: Proposal, item: Item, section: Section) -> dict:
         "item_code": item.item_code,
         "quantity": str(item.quantity),
         "unit_price": _format_currency(item.unit_price),
-        "item_total": _format_currency(item.quantity * item.unit_price),
+        "item_total": _format_currency(item_total),
         "item_image_url": item.item_image_url,
         "section_total": _format_currency(section_total),
         "freight": _format_currency(freight_value),
@@ -218,16 +224,12 @@ def generate_proposal(payload: GenerateRequest):
 
     prs = Presentation(io.BytesIO(pptx_bytes))
 
+    global_data = _build_global_data(payload.proposal)
+
+    # Slide fixo do vendedor
     seller_slide = prs.slides[3]
-    seller_data = {
-        "seller_name": payload.proposal.seller_name,
-        "seller_phone": payload.proposal.seller_phone,
-        "seller_email": payload.proposal.seller_email,
-        "seller_description": payload.proposal.seller_description,
-        "seller_image_url": payload.proposal.seller_image_url or "",
-    }
-    replace_text_placeholders_on_slide(seller_slide, seller_data)
-    replace_named_images_on_slide(seller_slide, seller_data)
+    replace_text_placeholders_on_slide(seller_slide, global_data)
+    replace_named_images_on_slide(seller_slide, global_data)
 
     slide_cursor = ITEM_SLIDE_INDEX
 
@@ -253,16 +255,7 @@ def generate_proposal(payload: GenerateRequest):
 
         summary_slide = prs.slides[slide_cursor]
         summary_data = {
-            "proposal_number": payload.proposal.proposal_number,
-            "client_name": payload.proposal.client_name,
-            "payment_method": payload.proposal.payment_method,
-            "delivery_date": payload.proposal.delivery_date,
-            "notes": payload.proposal.notes,
-            "seller_name": payload.proposal.seller_name,
-            "seller_phone": payload.proposal.seller_phone,
-            "seller_email": payload.proposal.seller_email,
-            "seller_description": payload.proposal.seller_description,
-            "seller_image_url": payload.proposal.seller_image_url or "",
+            **global_data,
             "section_total": _format_currency(
                 sum(i.quantity * i.unit_price for i in section.items)
             ),
@@ -274,20 +267,11 @@ def generate_proposal(payload: GenerateRequest):
         replace_text_placeholders_on_slide(summary_slide, summary_data)
         replace_named_images_on_slide(summary_slide, summary_data)
         slide_cursor += 1
-    
-    # PROCESSA ÚLTIMO SLIDE
+
+    # Último slide fixo
     last_slide = prs.slides[-1]
-
-    debug_data = {
-        "seller_name": payload.proposal.seller_name,
-        "seller_phone": payload.proposal.seller_phone,
-        "seller_email": payload.proposal.seller_email,
-        "seller_description": payload.proposal.seller_description,
-        "seller_image_url": payload.proposal.seller_image_url or "",
-    }
-
-    replace_text_placeholders_on_slide(last_slide, debug_data)
-    replace_named_images_on_slide(last_slide, debug_data)
+    replace_text_placeholders_on_slide(last_slide, global_data)
+    replace_named_images_on_slide(last_slide, global_data)
 
     out_buf = io.BytesIO()
     prs.save(out_buf)
@@ -300,7 +284,7 @@ def generate_proposal(payload: GenerateRequest):
             "application/vnd.openxmlformats-officedocument"
             ".presentationml.presentation"
         ),
-        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -411,7 +395,6 @@ def _expand_summary_table(slide, section):
         template_row_el = rows[template_row_idx]._tr
         parent = template_row_el.getparent()
 
-        # remove linhas antigas de placeholder abaixo da linha modelo
         current_rows = list(table.rows)
         for row in current_rows[template_row_idx + 1:]:
             row_text = " ".join(cell.text for cell in row.cells)
@@ -427,13 +410,11 @@ def _expand_summary_table(slide, section):
             ):
                 parent.remove(row._tr)
 
-        # clona linhas para os itens extras
         for _ in section.items[1:]:
             new_row_el = _deepcopy(template_row_el)
             parent.insert(parent.index(template_row_el) + 1, new_row_el)
             template_row_el = new_row_el
 
-        # recarrega as rows depois da expansão
         rows = list(table.rows)
         item_rows = rows[template_row_idx: template_row_idx + len(section.items)]
 
@@ -452,23 +433,25 @@ def _expand_summary_table(slide, section):
             }
 
             for cell in row.cells:
-                if cell.text_frame is not None:
-                    for paragraph in cell.text_frame.paragraphs:
-                        original_text = "".join(run.text for run in paragraph.runs)
-                        if not original_text:
-                            continue
+                if cell.text_frame is None:
+                    continue
 
-                        new_text = original_text
-                        for key, value in row_data.items():
-                            new_text = _re.sub(
-                                r"{{\s*" + _re.escape(key) + r"\s*}}",
-                                value,
-                                new_text,
-                            )
+                for paragraph in cell.text_frame.paragraphs:
+                    original_text = "".join(run.text for run in paragraph.runs)
+                    if not original_text:
+                        continue
 
-                        if new_text != original_text and len(paragraph.runs) > 0:
-                            paragraph.runs[0].text = new_text
-                            for run in paragraph.runs[1:]:
-                                run.text = ""
+                    new_text = original_text
+                    for key, value in row_data.items():
+                        new_text = _re.sub(
+                            r"{{\s*" + _re.escape(key) + r"\s*}}",
+                            value,
+                            new_text,
+                        )
+
+                    if new_text != original_text and len(paragraph.runs) > 0:
+                        paragraph.runs[0].text = new_text
+                        for run in paragraph.runs[1:]:
+                            run.text = ""
 
         break
