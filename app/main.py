@@ -364,6 +364,10 @@ def _reorder_slides(
 # ---------------------------------------------------------------------------
 
 def _expand_summary_table(slide, section):
+    """
+    Expande a tabela do slide de resumo criando 1 linha por item da section
+    e preenche cada linha usando replace direto no text_frame das células.
+    """
     for shape in slide.shapes:
         if not getattr(shape, "has_table", False):
             continue
@@ -393,6 +397,7 @@ def _expand_summary_table(slide, section):
         template_row_el = rows[template_row_idx]._tr
         parent = template_row_el.getparent()
 
+        # remove linhas antigas de placeholder abaixo da linha modelo
         current_rows = list(table.rows)
         for row in current_rows[template_row_idx + 1:]:
             row_text = " ".join(cell.text for cell in row.cells)
@@ -408,15 +413,19 @@ def _expand_summary_table(slide, section):
             ):
                 parent.remove(row._tr)
 
-        row_elements = [template_row_el]
+        # clona linhas para os itens extras
         for _ in section.items[1:]:
             new_row_el = _deepcopy(template_row_el)
-            parent.insert(parent.index(template_row_el) + len(row_elements), new_row_el)
-            row_elements.append(new_row_el)
+            parent.insert(parent.index(template_row_el) + 1, new_row_el)
+            template_row_el = new_row_el
 
-        for row_el, item in zip(row_elements, section.items):
+        # recarrega as rows depois da expansão
+        rows = list(table.rows)
+        item_rows = rows[template_row_idx: template_row_idx + len(section.items)]
+
+        for row, item in zip(item_rows, section.items):
             item_total = item.quantity * item.unit_price
-            replacements = {
+            row_data = {
                 "item_display_index": str(item.item_index + 1),
                 "item_index": str(item.item_index),
                 "item_name": item.item_name,
@@ -428,16 +437,24 @@ def _expand_summary_table(slide, section):
                 "item_total": _format_currency(item_total),
             }
 
-            for tc in row_el.iter(
-                "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
-            ):
-                if not tc.text:
-                    continue
-                for key, value in replacements.items():
-                    tc.text = _re.sub(
-                        r"{{\s*" + _re.escape(key) + r"\s*}}",
-                        value,
-                        tc.text,
-                    )
+            for cell in row.cells:
+                if cell.text_frame is not None:
+                    for paragraph in cell.text_frame.paragraphs:
+                        original_text = "".join(run.text for run in paragraph.runs)
+                        if not original_text:
+                            continue
+
+                        new_text = original_text
+                        for key, value in row_data.items():
+                            new_text = _re.sub(
+                                r"{{\s*" + _re.escape(key) + r"\s*}}",
+                                value,
+                                new_text,
+                            )
+
+                        if new_text != original_text and len(paragraph.runs) > 0:
+                            paragraph.runs[0].text = new_text
+                            for run in paragraph.runs[1:]:
+                                run.text = ""
 
         break
