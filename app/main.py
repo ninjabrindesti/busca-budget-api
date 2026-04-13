@@ -1,10 +1,369 @@
+"""
+main.py - Gerador de Proposta Ninja Brindes
+"""
+
+import io
+import os
+import uuid
+from contextlib import asynccontextmanager
+from copy import deepcopy as _deepcopy
+from typing import List, Optional
+from urllib.parse import urlparse
+import re as _re
+
+import httpx
+import zipfile as _zipfile
+from lxml import etree as _etree
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from pptx import Presentation
+
+from app.services.pptx_generator import (
+    replace_text_placeholders_on_slide,
+    replace_named_images_on_slide,
+)
+from app.services.slide_duplicator import duplicate_slide_in_pptx
+
+
+# ---------------------------------------------------------------------------
+# Constantes
+# ---------------------------------------------------------------------------
+
+TEMPLATE_PATH = "templates/template_ninja.pptx"
+TEMPLATE_URL = os.getenv("TEMPLATE_URL")
+
+ITEM_SLIDE_INDEX = 8
+SUMMARY_SLIDE_INDEX = 9
+
+
+# ---------------------------------------------------------------------------
+# Helpers de URL / template
+# ---------------------------------------------------------------------------
+
+def _is_valid_http_url(url: Optional[str]) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+
+    url = url.strip()
+    if " " in url:
+        return False
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    os.makedirs("templates", exist_ok=True)
+
+    if not os.path.exists(TEMPLATE_PATH):
+        if not _is_valid_http_url(TEMPLATE_URL):
+            raise RuntimeError(
+                "Template não encontrado localmente e TEMPLATE_URL está ausente ou inválida."
+            )
+
+        try:
+            with httpx.Client(timeout=30, follow_redirects=True) as client:
+                response = client.get(TEMPLATE_URL.strip())
+                response.raise_for_status()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Falha ao baixar o template em TEMPLATE_URL: {exc}"
+            ) from exc
+
+        with open(TEMPLATE_PATH, "wb") as f:
+            f.write(response.content)
+
+    yield
+
+
+app = FastAPI(title="Ninja Brindes - Gerador de Proposta", lifespan=lifespan)
+
+
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+
+class Proposal(BaseModel):
+    proposal_number: str
+    client_name: str
+    seller_name: str
+    seller_phone: str
+    seller_email: str
+    seller_description: str
+    seller_image_url: Optional[str] = None
+    payment_method: str
+    delivery_date: str
+    notes: str
+
+
+class Item(BaseModel):
+    item_index: int
+    item_name: str = Field(max_length=60)
+    item_subtitle: str = Field(max_length=80)
+    item_description: str = Field(max_length=300)
+    item_code: str = Field(max_length=30)
+    quantity: int
+    unit_price: float
+    item_image_url: str
+
+
+class Section(BaseModel):
+    section_index: int
+    freight_value: Optional[float] = None
+    freight_label: str
+    items: List[Item] = Field(min_length=1, max_length=10)
+
+
+class GenerateRequest(BaseModel):
+    proposal: Proposal
+    sections: List[Section] = Field(min_length=1)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _format_currency(value: float) -> str:
+    return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _build_data(proposal: Proposal, item: Item, section: Section) -> dict:
+    item_total = item.quantity * item.unit_price
+    freight_value = section.freight_value or 0.0
+    section_total = sum(i.quantity * i.unit_price for i in section.items)
+
+    return {
+        "proposal_number": proposal.proposal_number,
+        "client_name": proposal.client_name,
+        "payment_method": proposal.payment_method,
+        "delivery_date": proposal.delivery_date,
+        "notes": proposal.notes,
+        "seller_name": proposal.seller_name,
+        "seller_phone": proposal.seller_phone,
+        "seller_email": proposal.seller_email,
+        "seller_description": proposal.seller_description,
+        "seller_image_url": proposal.seller_image_url or "",
+        "item_name": item.item_name,
+        "item_subtitle": item.item_subtitle,
+        "item_index": str(item.item_index),
+        "item_display_index": str(item.item_index + 1),
+        "item_description": item.item_description,
+        "item_code": item.item_code,
+        "quantity": str(item.quantity),
+        "unit_price": _format_currency(item.unit_price),
+        "item_total": _format_currency(item.quantity * item.unit_price),
+        "item_image_url": item.item_image_url,
+        "section_total": _format_currency(section_total),
+        "freight": _format_currency(freight_value),
+        "freight_label": section.freight_label,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/generate")
+def generate_proposal(payload: GenerateRequest):
+    if not os.path.exists(TEMPLATE_PATH):
+        raise HTTPException(status_code=500, detail="Template não encontrado.")
+
+    with open(TEMPLATE_PATH, "rb") as f:
+        pptx_bytes = f.read()
+
+    total_item_slides = sum(len(s.items) for s in payload.sections)
+    total_summary_slides = len(payload.sections)
+
+    if total_item_slides <= 0:
+        raise HTTPException(status_code=400, detail="Nenhum item enviado.")
+
+    item_copies = max(total_item_slides - 1, 0)
+    summary_copies = max(total_summary_slides - 1, 0)
+
+    for _ in range(item_copies):
+        pptx_bytes = duplicate_slide_in_pptx(
+            input_bytes=pptx_bytes,
+            source_slide_index=ITEM_SLIDE_INDEX,
+            copies=1,
+            insert_after_index=ITEM_SLIDE_INDEX,
+        )
+
+    summary_original_index = ITEM_SLIDE_INDEX + total_item_slides
+    for _ in range(summary_copies):
+        pptx_bytes = duplicate_slide_in_pptx(
+            input_bytes=pptx_bytes,
+            source_slide_index=summary_original_index,
+            copies=1,
+            insert_after_index=summary_original_index,
+        )
+
+    pptx_bytes = _reorder_slides(
+        pptx_bytes=pptx_bytes,
+        sections=payload.sections,
+        total_item_slides=total_item_slides,
+        total_summary_slides=total_summary_slides,
+    )
+
+    prs = Presentation(io.BytesIO(pptx_bytes))
+
+    seller_slide = prs.slides[3]
+    seller_data = {
+        "seller_name": payload.proposal.seller_name,
+        "seller_phone": payload.proposal.seller_phone,
+        "seller_email": payload.proposal.seller_email,
+        "seller_description": payload.proposal.seller_description,
+        "seller_image_url": payload.proposal.seller_image_url or "",
+    }
+    replace_text_placeholders_on_slide(seller_slide, seller_data)
+    replace_named_images_on_slide(seller_slide, seller_data)
+
+    slide_cursor = ITEM_SLIDE_INDEX
+
+    for section in payload.sections:
+        for item in section.items:
+            if slide_cursor >= len(prs.slides):
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Slide de item não encontrado. Índice: {slide_cursor}",
+                )
+
+            slide = prs.slides[slide_cursor]
+            data = _build_data(payload.proposal, item, section)
+            replace_text_placeholders_on_slide(slide, data)
+            replace_named_images_on_slide(slide, data)
+            slide_cursor += 1
+
+        if slide_cursor >= len(prs.slides):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Slide de resumo não encontrado. Índice: {slide_cursor}",
+            )
+
+        summary_slide = prs.slides[slide_cursor]
+        summary_data = {
+            "proposal_number": payload.proposal.proposal_number,
+            "client_name": payload.proposal.client_name,
+            "payment_method": payload.proposal.payment_method,
+            "delivery_date": payload.proposal.delivery_date,
+            "notes": payload.proposal.notes,
+            "seller_name": payload.proposal.seller_name,
+            "seller_phone": payload.proposal.seller_phone,
+            "seller_email": payload.proposal.seller_email,
+            "seller_description": payload.proposal.seller_description,
+            "seller_image_url": payload.proposal.seller_image_url or "",
+            "section_total": _format_currency(
+                sum(i.quantity * i.unit_price for i in section.items)
+            ),
+            "freight": _format_currency(section.freight_value or 0.0),
+            "freight_label": section.freight_label,
+        }
+
+        _expand_summary_table(summary_slide, section)
+        replace_text_placeholders_on_slide(summary_slide, summary_data)
+        replace_named_images_on_slide(summary_slide, summary_data)
+        slide_cursor += 1
+
+    out_buf = io.BytesIO()
+    prs.save(out_buf)
+    out_buf.seek(0)
+
+    filename = f"proposta_{uuid.uuid4().hex[:8]}.pptx"
+    return StreamingResponse(
+        out_buf,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".presentationml.presentation"
+        ),
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reordenação de slides
+# ---------------------------------------------------------------------------
+
+_NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+
+
+def _reorder_slides(
+    pptx_bytes: bytes,
+    sections: List[Section],
+    total_item_slides: int,
+    total_summary_slides: int,
+) -> bytes:
+    buf: dict[str, bytes] = {}
+
+    with _zipfile.ZipFile(io.BytesIO(pptx_bytes), "r") as zf:
+        prs_root = _etree.fromstring(zf.read("ppt/presentation.xml"))
+
+        sld_id_lst = prs_root.find(f".//{{{_NS_P}}}sldIdLst")
+        sld_id_els = list(sld_id_lst)
+
+        fixed_before = sld_id_els[:ITEM_SLIDE_INDEX]
+        item_slides = sld_id_els[ITEM_SLIDE_INDEX: ITEM_SLIDE_INDEX + total_item_slides]
+        summary_slides = sld_id_els[
+            ITEM_SLIDE_INDEX + total_item_slides:
+            ITEM_SLIDE_INDEX + total_item_slides + total_summary_slides
+        ]
+        fixed_after = sld_id_els[
+            ITEM_SLIDE_INDEX + total_item_slides + total_summary_slides:
+        ]
+
+        new_order = list(fixed_before)
+        item_ptr = 0
+        summary_ptr = 0
+
+        for section in sections:
+            for _ in range(len(section.items)):
+                new_order.append(item_slides[item_ptr])
+                item_ptr += 1
+            new_order.append(summary_slides[summary_ptr])
+            summary_ptr += 1
+
+        new_order.extend(fixed_after)
+
+        for el in list(sld_id_lst):
+            sld_id_lst.remove(el)
+        for el in new_order:
+            sld_id_lst.append(el)
+
+        buf["ppt/presentation.xml"] = _etree.tostring(
+            prs_root,
+            xml_declaration=True,
+            encoding="utf-8",
+            standalone=True,
+        )
+
+        out = io.BytesIO()
+        with _zipfile.ZipFile(out, "w", _zipfile.ZIP_DEFLATED) as out_zf:
+            written = set()
+            for name, data in buf.items():
+                out_zf.writestr(name, data)
+                written.add(name)
+            for name in zf.namelist():
+                if name not in written:
+                    out_zf.writestr(name, zf.read(name))
+
+        return out.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Expansão da tabela de resumo
+# ---------------------------------------------------------------------------
+
 def _expand_summary_table(slide, section):
-    
-    """
-    Expande a tabela do slide de resumo criando 1 linha por item da section,
-    já preenchendo cada linha com os dados do item correspondente.
-    Funciona com placeholders com ou sem espaços: {{item_code}} ou {{ item_code }}.
-    """
     for shape in slide.shapes:
         if not getattr(shape, "has_table", False):
             continue
@@ -57,7 +416,6 @@ def _expand_summary_table(slide, section):
 
         for row_el, item in zip(row_elements, section.items):
             item_total = item.quantity * item.unit_price
-
             replacements = {
                 "item_display_index": str(item.item_index + 1),
                 "item_index": str(item.item_index),
@@ -70,11 +428,16 @@ def _expand_summary_table(slide, section):
                 "item_total": _format_currency(item_total),
             }
 
-            for tc in row_el.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t"):
+            for tc in row_el.iter(
+                "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
+            ):
                 if not tc.text:
                     continue
-
                 for key, value in replacements.items():
-                    tc.text = _re.sub(r"{{\s*" + _re.escape(key) + r"\s*}}", value, tc.text)
+                    tc.text = _re.sub(
+                        r"{{\s*" + _re.escape(key) + r"\s*}}",
+                        value,
+                        tc.text,
+                    )
 
         break
