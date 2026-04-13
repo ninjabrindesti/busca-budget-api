@@ -274,6 +274,20 @@ def generate_proposal(payload: GenerateRequest):
         replace_text_placeholders_on_slide(summary_slide, summary_data)
         replace_named_images_on_slide(summary_slide, summary_data)
         slide_cursor += 1
+    
+    # PROCESSA ÚLTIMO SLIDE
+    last_slide = prs.slides[-1]
+
+    debug_data = {
+        "seller_name": payload.proposal.seller_name,
+        "seller_phone": payload.proposal.seller_phone,
+        "seller_email": payload.proposal.seller_email,
+        "seller_description": payload.proposal.seller_description,
+        "seller_image_url": payload.proposal.seller_image_url or "",
+    }
+
+    replace_text_placeholders_on_slide(last_slide, debug_data)
+    replace_named_images_on_slide(last_slide, debug_data)
 
     out_buf = io.BytesIO()
     prs.save(out_buf)
