@@ -1,4 +1,5 @@
-def _expand_summary_table(slide, section: Section):
+def _expand_summary_table(slide, section):
+    
     """
     Expande a tabela do slide de resumo criando 1 linha por item da section,
     já preenchendo cada linha com os dados do item correspondente.
