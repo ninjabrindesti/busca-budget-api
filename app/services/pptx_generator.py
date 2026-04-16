@@ -1,9 +1,11 @@
+import io
 import os
 import re
 import uuid
 from copy import deepcopy
 
 import requests
+from PIL import Image, ImageDraw, ImageOps
 from pptx import Presentation
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*([\w\.]+)\s*}}")
@@ -52,7 +54,7 @@ def replace_text_placeholders_on_slide(slide, data: dict):
             _replace_in_text_frame(shape.text_frame, data)
 
 
-def _download_image(url: str) -> str | None:
+def _download_image(url: str, circular: bool = False) -> str | None:
     if not url or not isinstance(url, str):
         return None
 
@@ -72,6 +74,26 @@ def _download_image(url: str) -> str | None:
         response.raise_for_status()
     except Exception:
         return None
+
+    try:
+        img = Image.open(io.BytesIO(response.content)).convert("RGBA")
+    except Exception:
+        return None
+
+    if circular:
+        side = min(img.width, img.height)
+        img = ImageOps.fit(img, (side, side), method=Image.Resampling.LANCZOS)
+
+        mask = Image.new("L", (side, side), 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((0, 0, side, side), fill=255)
+
+        circular_img = Image.new("RGBA", (side, side), (255, 255, 255, 0))
+        circular_img.paste(img, (0, 0), mask)
+
+        file_path = f"/tmp/{uuid.uuid4().hex}.png"
+        circular_img.save(file_path, format="PNG")
+        return file_path
 
     content_type = response.headers.get("content-type", "").lower()
 
@@ -109,7 +131,8 @@ def replace_named_images_on_slide(slide, data: dict):
             shapes_to_replace.append((shape, image_mappings[shape_name], shape_name))
 
     for shape, image_url, shape_name in shapes_to_replace:
-        image_path = _download_image(image_url)
+        is_seller_image = shape_name == "seller_image"
+        image_path = _download_image(image_url, circular=is_seller_image)
         if not image_path:
             continue
 
