@@ -118,10 +118,22 @@ def replace_named_images_on_slide(slide, data: dict):
         width = shape.width
         height = shape.height
 
+        margin = int(min(width, height) * 0.08)
+        new_left = left + margin
+        new_top = top + margin
+        new_width = width - (margin * 2)
+        new_height = height - (margin * 2)
+
         sp = shape._element
         sp.getparent().remove(sp)
 
-        slide.shapes.add_picture(image_path, left, top, width=width, height=height)
+        slide.shapes.add_picture(
+            image_path,
+            new_left,
+            new_top,
+            width=new_width,
+            height=new_height,
+        )
 
         if os.path.exists(image_path):
             os.remove(image_path)
