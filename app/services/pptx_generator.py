@@ -68,11 +68,9 @@ def _download_image(url: str) -> str | None:
         return None
 
     try:
-        print("Baixando imagem:", url)
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-    except Exception as e:
-        print("Falha ao baixar imagem:", url, "erro:", str(e))
+    except Exception:
         return None
 
     content_type = response.headers.get("content-type", "").lower()
@@ -97,8 +95,6 @@ def replace_named_images(prs: Presentation, data: dict):
 def replace_named_images_on_slide(slide, data: dict):
     seller_image_url = data.get("seller_image_url") or data.get("seller_image")
 
-    print("DEBUG seller_image_url:", seller_image_url)
-
     image_mappings = {
         "seller_image": seller_image_url,
         "item_image": data.get("item_image_url"),
@@ -108,20 +104,13 @@ def replace_named_images_on_slide(slide, data: dict):
 
     for shape in slide.shapes:
         shape_name = getattr(shape, "name", "")
-        print("Shape encontrado:", shape_name)
 
         if shape_name in image_mappings and image_mappings[shape_name]:
             shapes_to_replace.append((shape, image_mappings[shape_name], shape_name))
 
-    if not shapes_to_replace:
-        print("Nenhum shape de imagem mapeado foi encontrado no slide")
-
     for shape, image_url, shape_name in shapes_to_replace:
-        print(f"Substituindo imagem no shape {shape_name} com URL {image_url}")
-
         image_path = _download_image(image_url)
         if not image_path:
-            print("Falha ao baixar imagem:", image_url)
             continue
 
         left = shape.left
