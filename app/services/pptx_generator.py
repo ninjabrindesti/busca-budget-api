@@ -144,7 +144,18 @@ def replace_named_images_on_slide(slide, data: dict):
         sp = shape._element
         sp.getparent().remove(sp)
 
-        slide.shapes.add_picture(image_path, left, top, width=width, height=height)
+        new_shape = slide.shapes.add_picture(
+            image_path,
+            left,
+            top,
+            width=width,
+            height=height,
+        )
+
+        # 🔥 CONTROLE DE CAMADA (Z-INDEX)
+        new_shape_el = new_shape._element
+        slide.shapes._spTree.remove(new_shape_el)
+        slide.shapes._spTree.insert(2, new_shape_el)
 
         if os.path.exists(image_path):
             os.remove(image_path)
