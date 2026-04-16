@@ -80,20 +80,19 @@ def _download_image(url: str, circular: bool = False) -> str | None:
     except Exception:
         return None
 
-    if circular:
-        side = min(img.width, img.height)
-        img = ImageOps.fit(img, (side, side), method=Image.Resampling.LANCZOS)
+   if circular:
+    side = min(img.width, img.height)
+    img = ImageOps.fit(img, (side, side), method=Image.Resampling.LANCZOS)
 
-        mask = Image.new("L", (side, side), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, side, side), fill=255)
+    mask = Image.new("L", (side, side), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, side, side), fill=255)
 
-        circular_img = Image.new("RGBA", (side, side), (255, 255, 255, 0))
-        circular_img.paste(img, (0, 0), mask)
+    img.putalpha(mask)
 
-        file_path = f"/tmp/{uuid.uuid4().hex}.png"
-        circular_img.save(file_path, format="PNG")
-        return file_path
+    file_path = f"/tmp/{uuid.uuid4().hex}.png"
+    img.save(file_path, format="PNG")
+    return file_path
 
     content_type = response.headers.get("content-type", "").lower()
 
