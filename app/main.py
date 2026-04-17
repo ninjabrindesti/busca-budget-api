@@ -209,6 +209,8 @@ def health():
 
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
+    print("DEBUG /generate payload:", payload.model_dump())
+
     if not os.path.exists(TEMPLATE_PATH):
         raise HTTPException(status_code=500, detail="Template não encontrado.")
 
