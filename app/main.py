@@ -134,6 +134,14 @@ def _format_currency(value: float) -> str:
     return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _calculate_section_total(section: Section) -> float:
+    return sum(item.quantity * item.unit_price for item in section.items)
+
+
+def _calculate_grand_total(section: Section) -> float:
+    return _calculate_section_total(section) + (section.freight_value or 0.0)
+
+
 def _build_global_data(proposal: Proposal) -> dict:
     return {
         "proposal_number": proposal.proposal_number,
@@ -152,7 +160,8 @@ def _build_global_data(proposal: Proposal) -> dict:
 def _build_data(proposal: Proposal, item: Item, section: Section) -> dict:
     item_total = item.quantity * item.unit_price
     freight_value = section.freight_value or 0.0
-    section_total = sum(i.quantity * i.unit_price for i in section.items)
+    section_total = _calculate_section_total(section)
+    grand_total = _calculate_grand_total(section)
 
     return {
         **_build_global_data(proposal),
@@ -168,7 +177,24 @@ def _build_data(proposal: Proposal, item: Item, section: Section) -> dict:
         "item_image_url": item.item_image_url,
         "section_total": _format_currency(section_total),
         "freight": _format_currency(freight_value),
+        "grand_total": _format_currency(grand_total),
         "freight_label": section.freight_label,
+    }
+
+
+def _build_summary_data(proposal: Proposal, section: Section) -> dict:
+    section_total = _calculate_section_total(section)
+    freight_value = section.freight_value or 0.0
+    grand_total = section_total + freight_value
+
+    return {
+        **_build_global_data(proposal),
+        "section_total": _format_currency(section_total),
+        "freight": _format_currency(freight_value),
+        "grand_total": _format_currency(grand_total),
+        "freight_label": section.freight_label,
+        "payment_method": proposal.payment_method,
+        "delivery_date": proposal.delivery_date,
     }
 
 
@@ -254,14 +280,7 @@ def generate_proposal(payload: GenerateRequest):
             )
 
         summary_slide = prs.slides[slide_cursor]
-        summary_data = {
-            **global_data,
-            "section_total": _format_currency(
-                sum(i.quantity * i.unit_price for i in section.items)
-            ),
-            "freight": _format_currency(section.freight_value or 0.0),
-            "freight_label": section.freight_label,
-        }
+        summary_data = _build_summary_data(payload.proposal, section)
 
         _expand_summary_table(summary_slide, section)
         replace_text_placeholders_on_slide(summary_slide, summary_data)
