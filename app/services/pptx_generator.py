@@ -141,8 +141,11 @@ def replace_named_images_on_slide(slide, data: dict):
         width = shape.width
         height = shape.height
 
-        sp = shape._element
-        sp.getparent().remove(sp)
+        original_el = shape._element
+        parent = original_el.getparent()
+        insert_index = parent.index(original_el)
+
+        parent.remove(original_el)
 
         new_shape = slide.shapes.add_picture(
             image_path,
@@ -152,10 +155,9 @@ def replace_named_images_on_slide(slide, data: dict):
             height=height,
         )
 
-        # 🔥 CONTROLE DE CAMADA (Z-INDEX)
         new_shape_el = new_shape._element
-        slide.shapes._spTree.remove(new_shape_el)
-        slide.shapes._spTree.insert(2, new_shape_el)
+        parent.remove(new_shape_el)
+        parent.insert(insert_index, new_shape_el)
 
         if os.path.exists(image_path):
             os.remove(image_path)
