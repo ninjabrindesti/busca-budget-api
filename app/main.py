@@ -284,6 +284,27 @@ def generate_proposal(payload: GenerateRequest):
 
         _expand_summary_table(summary_slide, section)
         replace_text_placeholders_on_slide(summary_slide, summary_data)
+
+        # força substituição dos placeholders simples fora da tabela
+        for shape in summary_slide.shapes:
+            if hasattr(shape, "text_frame") and shape.text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    full_text = "".join(run.text for run in paragraph.runs)
+
+                    if not full_text:
+                        continue
+
+                    full_text = full_text.replace(
+                        "{{payment_method}}",
+                        summary_data["payment_method"],
+                    )
+                    full_text = full_text.replace(
+                        "{{delivery_date}}",
+                        summary_data["delivery_date"],
+                    )
+
+                    paragraph.text = full_text
+
         replace_named_images_on_slide(summary_slide, summary_data)
         slide_cursor += 1
 
