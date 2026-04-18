@@ -216,9 +216,6 @@ def generate_proposal(payload: GenerateRequest):
     if not os.path.exists(TEMPLATE_PATH):
         raise HTTPException(status_code=500, detail="Template não encontrado.")
 
-    if not os.path.exists(TEMPLATE_PATH):
-        raise HTTPException(status_code=500, detail="Template não encontrado.")
-
     with open(TEMPLATE_PATH, "rb") as f:
         pptx_bytes = f.read()
 
