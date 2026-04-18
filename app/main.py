@@ -154,6 +154,16 @@ def _build_global_data(proposal: Proposal) -> dict:
         "payment_method": proposal.payment_method,
         "delivery_date": proposal.delivery_date,
         "notes": proposal.notes,
+
+        # resumo
+        "summary_payment_method": proposal.payment_method or "",
+        "summary_delivery_date": proposal.delivery_date or "",
+
+        # capa
+        "cover_proposal_number": proposal.proposal_number or "",
+        "cover_company": proposal.company_name or "",
+        "cover_client": proposal.client_name or "",
+        "cover_obs_cnpj": proposal.notes or "",
     }
 
 
