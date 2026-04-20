@@ -35,6 +35,7 @@ from app.services.slide_duplicator import duplicate_slide_in_pptx
 TEMPLATE_PATH = "templates/template_ninja.pptx"
 TEMPLATE_URL = os.getenv("TEMPLATE_URL")
 
+COVER_SLIDE_INDEX = 0
 ITEM_SLIDE_INDEX = 8
 SUMMARY_SLIDE_INDEX = 9
 
@@ -92,13 +93,11 @@ app = FastAPI(title="Ninja Brindes - Gerador de Proposta", lifespan=lifespan)
 # ---------------------------------------------------------------------------
 
 class Proposal(BaseModel):
-    # Aceita campos extras que o cliente venha a enviar no futuro
-    # sem quebrar o endpoint (forward compat).
     model_config = ConfigDict(extra="allow")
 
     proposal_number: str
     client_name: str
-    company_name: Optional[str] = ""        # ← novo: usado em cover_company
+    company_name: Optional[str] = ""
     seller_name: str
     seller_phone: str
     seller_email: str
@@ -107,7 +106,6 @@ class Proposal(BaseModel):
     payment_method: str
     delivery_date: str
     notes: str
-    # extras opcionais aceitos do frontend (não obrigatórios pelo template)
     payment_term: Optional[str] = ""
     obs_cnpj: Optional[str] = ""
 
@@ -154,8 +152,6 @@ def _calculate_grand_total(section: Section) -> float:
 
 
 def _build_global_data(proposal: Proposal) -> dict:
-    # getattr defensivo: mesmo que o schema mude no futuro,
-    # nunca mais quebra com AttributeError aqui.
     company_name = getattr(proposal, "company_name", "") or ""
     obs_cnpj = getattr(proposal, "obs_cnpj", "") or proposal.notes or ""
 
@@ -226,6 +222,33 @@ def _build_summary_data(proposal: Proposal, section: Section) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Helper genérico de substituição manual em um slide
+# ---------------------------------------------------------------------------
+
+def _force_replace_on_slide(slide, replacements: dict) -> None:
+    """
+    Substitui placeholders {{key}} em todos os text_frames do slide,
+    preservando a formatação do primeiro run de cada parágrafo.
+    Usa-se como fallback quando replace_text_placeholders_on_slide
+    não conhece chaves novas (allow-list desatualizada).
+    """
+    for shape in slide.shapes:
+        if not hasattr(shape, "text_frame") or shape.text_frame is None:
+            continue
+        for paragraph in shape.text_frame.paragraphs:
+            full_text = "".join(run.text for run in paragraph.runs)
+            if not full_text:
+                continue
+            new_text = full_text
+            for key, value in replacements.items():
+                new_text = new_text.replace(key, value or "")
+            if new_text != full_text and paragraph.runs:
+                paragraph.runs[0].text = new_text
+                for run in paragraph.runs[1:]:
+                    run.text = ""
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -284,6 +307,17 @@ def generate_proposal(payload: GenerateRequest):
 
         global_data = _build_global_data(payload.proposal)
 
+        # === Capa (slide 0) — fallback p/ placeholders cover_* do template novo
+        cover_slide = prs.slides[COVER_SLIDE_INDEX]
+        replace_text_placeholders_on_slide(cover_slide, global_data)
+        replace_named_images_on_slide(cover_slide, global_data)
+        _force_replace_on_slide(cover_slide, {
+            "{{cover_proposal_number}}": global_data["cover_proposal_number"],
+            "{{cover_company}}":          global_data["cover_company"],
+            "{{cover_client}}":           global_data["cover_client"],
+            "{{cover_obs_cnpj}}":         global_data["cover_obs_cnpj"],
+        })
+
         # Slide fixo do vendedor
         seller_slide = prs.slides[3]
         replace_text_placeholders_on_slide(seller_slide, global_data)
@@ -317,25 +351,13 @@ def generate_proposal(payload: GenerateRequest):
             _expand_summary_table(summary_slide, section)
             replace_text_placeholders_on_slide(summary_slide, summary_data)
 
-            # força substituição dos placeholders simples fora da tabela
-            for shape in summary_slide.shapes:
-                if hasattr(shape, "text_frame") and shape.text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        full_text = "".join(run.text for run in paragraph.runs)
-
-                        if not full_text:
-                            continue
-
-                        full_text = full_text.replace(
-                            "{{payment_method}}",
-                            summary_data["payment_method"],
-                        )
-                        full_text = full_text.replace(
-                            "{{delivery_date}}",
-                            summary_data["delivery_date"],
-                        )
-
-                        paragraph.text = full_text
+            # Fallback p/ placeholders simples do resumo (incluindo summary_*)
+            _force_replace_on_slide(summary_slide, {
+                "{{payment_method}}":         summary_data["payment_method"],
+                "{{delivery_date}}":          summary_data["delivery_date"],
+                "{{summary_payment_method}}": summary_data["summary_payment_method"],
+                "{{summary_delivery_date}}":  summary_data["summary_delivery_date"],
+            })
 
             replace_named_images_on_slide(summary_slide, summary_data)
             slide_cursor += 1
@@ -360,11 +382,8 @@ def generate_proposal(payload: GenerateRequest):
         )
 
     except HTTPException:
-        # Mantém status/detail definidos pelo próprio fluxo
         raise
     except Exception as e:
-        # Loga stacktrace COMPLETO no Render para diagnóstico,
-        # e devolve detalhe útil ao cliente em vez de "Internal Server Error".
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
