@@ -4,6 +4,7 @@ main.py - Gerador de Proposta Ninja Brindes
 
 import io
 import os
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from copy import deepcopy as _deepcopy
@@ -17,7 +18,7 @@ from lxml import etree as _etree
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pptx import Presentation
 
 from app.services.pptx_generator import (
@@ -91,8 +92,13 @@ app = FastAPI(title="Ninja Brindes - Gerador de Proposta", lifespan=lifespan)
 # ---------------------------------------------------------------------------
 
 class Proposal(BaseModel):
+    # Aceita campos extras que o cliente venha a enviar no futuro
+    # sem quebrar o endpoint (forward compat).
+    model_config = ConfigDict(extra="allow")
+
     proposal_number: str
     client_name: str
+    company_name: Optional[str] = ""        # ← novo: usado em cover_company
     seller_name: str
     seller_phone: str
     seller_email: str
@@ -101,6 +107,9 @@ class Proposal(BaseModel):
     payment_method: str
     delivery_date: str
     notes: str
+    # extras opcionais aceitos do frontend (não obrigatórios pelo template)
+    payment_term: Optional[str] = ""
+    obs_cnpj: Optional[str] = ""
 
 
 class Item(BaseModel):
@@ -122,6 +131,8 @@ class Section(BaseModel):
 
 
 class GenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     proposal: Proposal
     sections: List[Section] = Field(min_length=1)
 
@@ -143,9 +154,15 @@ def _calculate_grand_total(section: Section) -> float:
 
 
 def _build_global_data(proposal: Proposal) -> dict:
+    # getattr defensivo: mesmo que o schema mude no futuro,
+    # nunca mais quebra com AttributeError aqui.
+    company_name = getattr(proposal, "company_name", "") or ""
+    obs_cnpj = getattr(proposal, "obs_cnpj", "") or proposal.notes or ""
+
     return {
         "proposal_number": proposal.proposal_number,
         "client_name": proposal.client_name,
+        "company_name": company_name,
         "seller_name": proposal.seller_name,
         "seller_phone": proposal.seller_phone,
         "seller_email": proposal.seller_email,
@@ -155,15 +172,15 @@ def _build_global_data(proposal: Proposal) -> dict:
         "delivery_date": proposal.delivery_date,
         "notes": proposal.notes,
 
-        # resumo
+        # resumo (template novo)
         "summary_payment_method": proposal.payment_method or "",
         "summary_delivery_date": proposal.delivery_date or "",
 
-        # capa
+        # capa (template novo)
         "cover_proposal_number": proposal.proposal_number or "",
-        "cover_company": proposal.company_name or "",
+        "cover_company": company_name,
         "cover_client": proposal.client_name or "",
-        "cover_obs_cnpj": proposal.notes or "",
+        "cover_obs_cnpj": obs_cnpj,
     }
 
 
@@ -219,127 +236,144 @@ def health():
 
 @app.post("/generate")
 def generate_proposal(payload: GenerateRequest):
-    print("DEBUG /generate payload:", payload.model_dump())
-    print("DEBUG payment_method:", payload.proposal.payment_method)
-    print("DEBUG delivery_date:", payload.proposal.delivery_date)
+    try:
+        print("DEBUG /generate payload:", payload.model_dump())
+        print("DEBUG payment_method:", payload.proposal.payment_method)
+        print("DEBUG delivery_date:", payload.proposal.delivery_date)
 
-    if not os.path.exists(TEMPLATE_PATH):
-        raise HTTPException(status_code=500, detail="Template não encontrado.")
+        if not os.path.exists(TEMPLATE_PATH):
+            raise HTTPException(status_code=500, detail="Template não encontrado.")
 
-    with open(TEMPLATE_PATH, "rb") as f:
-        pptx_bytes = f.read()
+        with open(TEMPLATE_PATH, "rb") as f:
+            pptx_bytes = f.read()
 
-    total_item_slides = sum(len(s.items) for s in payload.sections)
-    total_summary_slides = len(payload.sections)
+        total_item_slides = sum(len(s.items) for s in payload.sections)
+        total_summary_slides = len(payload.sections)
 
-    if total_item_slides <= 0:
-        raise HTTPException(status_code=400, detail="Nenhum item enviado.")
+        if total_item_slides <= 0:
+            raise HTTPException(status_code=400, detail="Nenhum item enviado.")
 
-    item_copies = max(total_item_slides - 1, 0)
-    summary_copies = max(total_summary_slides - 1, 0)
+        item_copies = max(total_item_slides - 1, 0)
+        summary_copies = max(total_summary_slides - 1, 0)
 
-    for _ in range(item_copies):
-        pptx_bytes = duplicate_slide_in_pptx(
-            input_bytes=pptx_bytes,
-            source_slide_index=ITEM_SLIDE_INDEX,
-            copies=1,
-            insert_after_index=ITEM_SLIDE_INDEX,
+        for _ in range(item_copies):
+            pptx_bytes = duplicate_slide_in_pptx(
+                input_bytes=pptx_bytes,
+                source_slide_index=ITEM_SLIDE_INDEX,
+                copies=1,
+                insert_after_index=ITEM_SLIDE_INDEX,
+            )
+
+        summary_original_index = ITEM_SLIDE_INDEX + total_item_slides
+        for _ in range(summary_copies):
+            pptx_bytes = duplicate_slide_in_pptx(
+                input_bytes=pptx_bytes,
+                source_slide_index=summary_original_index,
+                copies=1,
+                insert_after_index=summary_original_index,
+            )
+
+        pptx_bytes = _reorder_slides(
+            pptx_bytes=pptx_bytes,
+            sections=payload.sections,
+            total_item_slides=total_item_slides,
+            total_summary_slides=total_summary_slides,
         )
 
-    summary_original_index = ITEM_SLIDE_INDEX + total_item_slides
-    for _ in range(summary_copies):
-        pptx_bytes = duplicate_slide_in_pptx(
-            input_bytes=pptx_bytes,
-            source_slide_index=summary_original_index,
-            copies=1,
-            insert_after_index=summary_original_index,
-        )
+        prs = Presentation(io.BytesIO(pptx_bytes))
 
-    pptx_bytes = _reorder_slides(
-        pptx_bytes=pptx_bytes,
-        sections=payload.sections,
-        total_item_slides=total_item_slides,
-        total_summary_slides=total_summary_slides,
-    )
+        global_data = _build_global_data(payload.proposal)
 
-    prs = Presentation(io.BytesIO(pptx_bytes))
+        # Slide fixo do vendedor
+        seller_slide = prs.slides[3]
+        replace_text_placeholders_on_slide(seller_slide, global_data)
+        replace_named_images_on_slide(seller_slide, global_data)
 
-    global_data = _build_global_data(payload.proposal)
+        slide_cursor = ITEM_SLIDE_INDEX
 
-    # Slide fixo do vendedor
-    seller_slide = prs.slides[3]
-    replace_text_placeholders_on_slide(seller_slide, global_data)
-    replace_named_images_on_slide(seller_slide, global_data)
+        for section in payload.sections:
+            for item in section.items:
+                if slide_cursor >= len(prs.slides):
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Slide de item não encontrado. Índice: {slide_cursor}",
+                    )
 
-    slide_cursor = ITEM_SLIDE_INDEX
+                slide = prs.slides[slide_cursor]
+                data = _build_data(payload.proposal, item, section)
+                replace_text_placeholders_on_slide(slide, data)
+                replace_named_images_on_slide(slide, data)
+                slide_cursor += 1
 
-    for section in payload.sections:
-        for item in section.items:
             if slide_cursor >= len(prs.slides):
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Slide de item não encontrado. Índice: {slide_cursor}",
+                    detail=f"Slide de resumo não encontrado. Índice: {slide_cursor}",
                 )
 
-            slide = prs.slides[slide_cursor]
-            data = _build_data(payload.proposal, item, section)
-            replace_text_placeholders_on_slide(slide, data)
-            replace_named_images_on_slide(slide, data)
+            summary_slide = prs.slides[slide_cursor]
+            summary_data = _build_summary_data(payload.proposal, section)
+
+            _expand_summary_table(summary_slide, section)
+            replace_text_placeholders_on_slide(summary_slide, summary_data)
+
+            # força substituição dos placeholders simples fora da tabela
+            for shape in summary_slide.shapes:
+                if hasattr(shape, "text_frame") and shape.text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        full_text = "".join(run.text for run in paragraph.runs)
+
+                        if not full_text:
+                            continue
+
+                        full_text = full_text.replace(
+                            "{{payment_method}}",
+                            summary_data["payment_method"],
+                        )
+                        full_text = full_text.replace(
+                            "{{delivery_date}}",
+                            summary_data["delivery_date"],
+                        )
+
+                        paragraph.text = full_text
+
+            replace_named_images_on_slide(summary_slide, summary_data)
             slide_cursor += 1
 
-        if slide_cursor >= len(prs.slides):
-            raise HTTPException(
-                status_code=500,
-                detail=f"Slide de resumo não encontrado. Índice: {slide_cursor}",
-            )
+        # Último slide fixo
+        last_slide = prs.slides[-1]
+        replace_text_placeholders_on_slide(last_slide, global_data)
+        replace_named_images_on_slide(last_slide, global_data)
 
-        summary_slide = prs.slides[slide_cursor]
-        summary_data = _build_summary_data(payload.proposal, section)
+        out_buf = io.BytesIO()
+        prs.save(out_buf)
+        out_buf.seek(0)
 
-        _expand_summary_table(summary_slide, section)
-        replace_text_placeholders_on_slide(summary_slide, summary_data)
+        filename = f"proposta_{uuid.uuid4().hex[:8]}.pptx"
+        return StreamingResponse(
+            out_buf,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument"
+                ".presentationml.presentation"
+            ),
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
-        # força substituição dos placeholders simples fora da tabela
-        for shape in summary_slide.shapes:
-            if hasattr(shape, "text_frame") and shape.text_frame:
-                for paragraph in shape.text_frame.paragraphs:
-                    full_text = "".join(run.text for run in paragraph.runs)
-
-                    if not full_text:
-                        continue
-
-                    full_text = full_text.replace(
-                        "{{payment_method}}",
-                        summary_data["payment_method"],
-                    )
-                    full_text = full_text.replace(
-                        "{{delivery_date}}",
-                        summary_data["delivery_date"],
-                    )
-
-                    paragraph.text = full_text
-
-        replace_named_images_on_slide(summary_slide, summary_data)
-        slide_cursor += 1
-
-    # Último slide fixo
-    last_slide = prs.slides[-1]
-    replace_text_placeholders_on_slide(last_slide, global_data)
-    replace_named_images_on_slide(last_slide, global_data)
-
-    out_buf = io.BytesIO()
-    prs.save(out_buf)
-    out_buf.seek(0)
-
-    filename = f"proposta_{uuid.uuid4().hex[:8]}.pptx"
-    return StreamingResponse(
-        out_buf,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument"
-            ".presentationml.presentation"
-        ),
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    except HTTPException:
+        # Mantém status/detail definidos pelo próprio fluxo
+        raise
+    except Exception as e:
+        # Loga stacktrace COMPLETO no Render para diagnóstico,
+        # e devolve detalhe útil ao cliente em vez de "Internal Server Error".
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "render_failed",
+                "type": type(e).__name__,
+                "message": str(e),
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
