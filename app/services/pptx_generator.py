@@ -54,7 +54,12 @@ def replace_text_placeholders_on_slide(slide, data: dict):
             _replace_in_text_frame(shape.text_frame, data)
 
 
-def _download_image(url: str, circular: bool = False) -> str | None:
+def _download_image(
+    url: str,
+    circular: bool = False,
+    target_width: int | None = None,
+    target_height: int | None = None,
+) -> str | None:
     if not url or not isinstance(url, str):
         return None
 
@@ -94,17 +99,17 @@ def _download_image(url: str, circular: bool = False) -> str | None:
         img.save(file_path, format="PNG")
         return file_path
 
-    content_type = response.headers.get("content-type", "").lower()
+    # Ajuste proporcional com corte central (cover)
+    if target_width and target_height:
+        img = ImageOps.fit(
+            img,
+            (int(target_width), int(target_height)),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5),
+        )
 
-    extension = ".png"
-    if "jpeg" in content_type or "jpg" in content_type:
-        extension = ".jpg"
-
-    file_path = f"/tmp/{uuid.uuid4().hex}{extension}"
-
-    with open(file_path, "wb") as f:
-        f.write(response.content)
-
+    file_path = f"/tmp/{uuid.uuid4().hex}.png"
+    img.save(file_path, format="PNG")
     return file_path
 
 
