@@ -143,8 +143,28 @@ def replace_named_images_on_slide(slide, data: dict):
 
         left = shape.left
         top = shape.top
-        width = shape.width
-        height = shape.height
+        box_width = shape.width
+        box_height = shape.height
+
+        # Calcular dimensões preservando proporção da imagem (comportamento "contain")
+        with Image.open(image_path) as img:
+            img_w, img_h = img.size
+
+        img_ratio = img_w / img_h
+        box_ratio = box_width / box_height
+
+        if img_ratio > box_ratio:
+            # Imagem mais larga que o espaço: limitar pela largura
+            new_width = box_width
+            new_height = int(box_width / img_ratio)
+        else:
+            # Imagem mais alta que o espaço: limitar pela altura
+            new_height = box_height
+            new_width = int(box_height * img_ratio)
+
+        # Centralizar dentro do espaço original do template
+        offset_x = (box_width - new_width) // 2
+        offset_y = (box_height - new_height) // 2
 
         original_el = shape._element
         parent = original_el.getparent()
@@ -154,10 +174,10 @@ def replace_named_images_on_slide(slide, data: dict):
 
         new_shape = slide.shapes.add_picture(
             image_path,
-            left,
-            top,
-            width=width,
-            height=height,
+            left + offset_x,
+            top + offset_y,
+            width=new_width,
+            height=new_height,
         )
 
         new_shape_el = new_shape._element
