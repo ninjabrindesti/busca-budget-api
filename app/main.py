@@ -101,6 +101,8 @@ class Proposal(BaseModel):
     delivery_date: Optional[str] = ""
     notes: Optional[str] = ""
     obs_cnpj: Optional[str] = ""
+    cover_cnpj: Optional[str] = ""
+    cover_corporate_name: Optional[str] = ""
 
 
 class Item(BaseModel):
@@ -161,12 +163,14 @@ def _build_global_data(proposal: Proposal) -> dict:
     notes          = _s(getattr(proposal, "notes", ""))
     obs_cnpj       = _s(getattr(proposal, "obs_cnpj", ""))
 
-    in_summary_pm = _s(getattr(proposal, "summary_payment_method", ""))
-    in_summary_dd = _s(getattr(proposal, "summary_delivery_date", ""))
-    in_cover_pn   = _s(getattr(proposal, "cover_proposal_number", ""))
-    in_cover_co   = _s(getattr(proposal, "cover_company", ""))
-    in_cover_cl   = _s(getattr(proposal, "cover_client", ""))
-    in_cover_obs  = _s(getattr(proposal, "cover_obs_cnpj", ""))
+    in_summary_pm      = _s(getattr(proposal, "summary_payment_method", ""))
+    in_summary_dd      = _s(getattr(proposal, "summary_delivery_date", ""))
+    in_cover_pn        = _s(getattr(proposal, "cover_proposal_number", ""))
+    in_cover_co        = _s(getattr(proposal, "cover_company", ""))
+    in_cover_cl        = _s(getattr(proposal, "cover_client", ""))
+    in_cover_obs       = _s(getattr(proposal, "cover_obs_cnpj", ""))
+    in_cover_cnpj      = _s(getattr(proposal, "cover_cnpj", ""))
+    in_cover_corp_name = _s(getattr(proposal, "cover_corporate_name", ""))
 
     summary_payment_method = in_summary_pm or payment_method or payment_term or ""
     summary_delivery_date  = in_summary_dd or delivery_date  or ""
@@ -174,6 +178,8 @@ def _build_global_data(proposal: Proposal) -> dict:
     cover_company          = in_cover_co   or company_name   or ""
     cover_client           = in_cover_cl   or _s(proposal.client_name)
     cover_proposal_number  = in_cover_pn   or _s(proposal.proposal_number)
+    cover_cnpj             = in_cover_cnpj
+    cover_corporate_name   = in_cover_corp_name
 
     return {
         # legados (retrocompat)
@@ -196,6 +202,9 @@ def _build_global_data(proposal: Proposal) -> dict:
         "cover_company":          cover_company,
         "cover_client":           cover_client,
         "cover_obs_cnpj":         cover_obs_cnpj,
+        # NOVOS
+        "cover_cnpj":             cover_cnpj,
+        "cover_corporate_name":   cover_corporate_name,
     }
 
 
