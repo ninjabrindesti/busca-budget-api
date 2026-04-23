@@ -127,7 +127,7 @@ def duplicate_slide_in_pptx(
             used_paths.add(new_slide_path)
 
             # --- Copia e remapeia .rels do slide (com novos rIds únicos) ---
-            rid_remap: dict[str, str] = {}  # old rId → new rId
+            rid_remap: dict[str, str] = {}  # old rId -> new rId
 
             if src_rels_path in all_names or src_rels_path in buf:
                 src_rels_bytes = buf.get(src_rels_path) or zf.read(src_rels_path)
@@ -141,10 +141,56 @@ def duplicate_slide_in_pptx(
                     rel.set("Id", new_rid)
 
                     tgt = rel.get("Target", "")
+                    rel_type = rel.get("Type", "").split("/")[-1]
+
                     if tgt.startswith("../media/"):
+                        # Mídia: copia o arquivo (pode ser compartilhada)
                         media_name = tgt.replace("../", "ppt/")
                         if media_name in all_names and media_name not in buf:
                             buf[media_name] = zf.read(media_name)
+
+                    elif rel_type == "vmlDrawing":
+                        # vmlDrawing NÃO pode ser compartilhado entre slides:
+                        # cada slide precisa do seu próprio arquivo .vml + .vml.rels
+                        # Caso contrário o PowerPoint renderiza o clone como slide preto.
+                        src_vml_name = "ppt/" + tgt.replace("../", "")  # ppt/drawings/vmlDrawingX.vml
+                        vml_basename = tgt.split("/")[-1]                # vmlDrawingX.vml
+
+                        # Determina novo número para o vmlDrawing clone
+                        used_vml_nums = {
+                            int(m.group(1))
+                            for p in used_paths
+                            for m in [re.search(r"vmlDrawing(\d+)\.vml$", p)]
+                            if m
+                        }
+                        new_vml_num = max(used_vml_nums, default=0) + 1
+                        new_vml_name     = f"ppt/drawings/vmlDrawing{new_vml_num}.vml"
+                        new_vml_rels_name = f"ppt/drawings/_rels/vmlDrawing{new_vml_num}.vml.rels"
+                        used_paths.add(new_vml_name)
+
+                        # Copia conteúdo do .vml
+                        if src_vml_name in all_names:
+                            buf[new_vml_name] = buf.get(src_vml_name) or zf.read(src_vml_name)
+
+                        # Copia o .rels do vmlDrawing (contém referências de imagem de fundo)
+                        src_vml_rels_name = f"ppt/drawings/_rels/{vml_basename}.rels"
+                        if src_vml_rels_name in all_names:
+                            buf[new_vml_rels_name] = buf.get(src_vml_rels_name) or zf.read(src_vml_rels_name)
+
+                        # Registra o novo vmlDrawing no Content_Types.xml
+                        ct_bytes = buf.get("[Content_Types].xml") or zf.read("[Content_Types].xml")
+                        ct_root  = _parse(ct_bytes)
+                        part_name = f"/ppt/drawings/vmlDrawing{new_vml_num}.vml"
+                        existing_parts = {el.get("PartName") for el in ct_root}
+                        if part_name not in existing_parts:
+                            override = etree.SubElement(ct_root, f"{{{NS_CT}}}Override")
+                            override.set("PartName", part_name)
+                            override.set("ContentType",
+                                "application/vnd.openxmlformats-officedocument.vmlDrawing")
+                        buf["[Content_Types].xml"] = _serialize(ct_root)
+
+                        # Atualiza o Target no .rels do slide para apontar pro novo vmlDrawing
+                        rel.set("Target", f"../drawings/vmlDrawing{new_vml_num}.vml")
 
                 buf[new_rels_path] = _serialize(slide_rels_root)
             else:
@@ -157,7 +203,6 @@ def duplicate_slide_in_pptx(
             if rid_remap:
                 slide_xml_str = src_bytes.decode("utf-8")
                 for old_rid, new_rid in rid_remap.items():
-                    # substitui r:id="rIdX" e r:embed="rIdX" e r:link="rIdX"
                     slide_xml_str = slide_xml_str.replace(
                         f'r:id="{old_rid}"', f'r:id="{new_rid}"')
                     slide_xml_str = slide_xml_str.replace(
