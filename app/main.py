@@ -233,7 +233,7 @@ def _build_data(
         "item_image_url":     _s(item.item_image_url),
         "section_total":      _format_currency(_calculate_section_total(section)),
         "freight":            _format_currency(section.freight_value or 0.0),
-        "section_freight":    _format_currency(section.freight_value or 0.0),
+        "section_freight":    _s(section.freight_label),
         "grand_total":        _format_currency(_calculate_grand_total(section)),
         "freight_label":      _s(section.freight_label),
     }
@@ -246,7 +246,7 @@ def _build_summary_data(proposal: Proposal, section: Section) -> dict:
         **_build_global_data(proposal),
         "section_total":   _format_currency(section_total),
         "freight":         _format_currency(freight_value),
-        "section_freight": _format_currency(freight_value),
+        "section_freight": _s(section.freight_label),
         "grand_total":     _format_currency(section_total + freight_value),
         "freight_label":   _s(section.freight_label),
     }
