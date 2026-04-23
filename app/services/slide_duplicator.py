@@ -126,17 +126,20 @@ def duplicate_slide_in_pptx(
             new_rels_path  = f"ppt/slides/_rels/slide{n}.xml.rels"
             used_paths.add(new_slide_path)
 
-            # --- Copia XML do slide ---
-            src_bytes = buf.get(src_path) or zf.read(src_path)
-            buf[new_slide_path] = src_bytes  # clonamos sem alterar conteúdo
+            # --- Copia e remapeia .rels do slide (com novos rIds únicos) ---
+            rid_remap: dict[str, str] = {}  # old rId → new rId
 
-            # --- Copia e remapeia .rels do slide ---
             if src_rels_path in all_names or src_rels_path in buf:
                 src_rels_bytes = buf.get(src_rels_path) or zf.read(src_rels_path)
                 slide_rels_root = _parse(src_rels_bytes)
 
-                # Para cada rel de mídia, copia o arquivo de mídia
                 for rel in slide_rels_root.findall(f"{{{NS_REL}}}Relationship"):
+                    old_rid = rel.get("Id", "")
+                    new_rid = f"rId{next_rid_num}"
+                    next_rid_num += 1
+                    rid_remap[old_rid] = new_rid
+                    rel.set("Id", new_rid)
+
                     tgt = rel.get("Target", "")
                     if tgt.startswith("../media/"):
                         media_name = tgt.replace("../", "ppt/")
@@ -148,6 +151,22 @@ def duplicate_slide_in_pptx(
                 # Cria rels mínimo
                 min_rels = etree.Element(f"{{{NS_REL}}}Relationships")
                 buf[new_rels_path] = _serialize(min_rels)
+
+            # --- Copia XML do slide remapeando rIds ---
+            src_bytes = buf.get(src_path) or zf.read(src_path)
+            if rid_remap:
+                slide_xml_str = src_bytes.decode("utf-8")
+                for old_rid, new_rid in rid_remap.items():
+                    # substitui r:id="rIdX" e r:embed="rIdX" e r:link="rIdX"
+                    slide_xml_str = slide_xml_str.replace(
+                        f'r:id="{old_rid}"', f'r:id="{new_rid}"')
+                    slide_xml_str = slide_xml_str.replace(
+                        f'r:embed="{old_rid}"', f'r:embed="{new_rid}"')
+                    slide_xml_str = slide_xml_str.replace(
+                        f'r:link="{old_rid}"', f'r:link="{new_rid}"')
+                buf[new_slide_path] = slide_xml_str.encode("utf-8")
+            else:
+                buf[new_slide_path] = src_bytes
 
             # --- Registra em Content_Types.xml ---
             ct_bytes = buf.get("[Content_Types].xml") or zf.read("[Content_Types].xml")
