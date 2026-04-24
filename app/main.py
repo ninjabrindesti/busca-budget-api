@@ -488,7 +488,7 @@ def generate_proposal(payload: GenerateRequest):
 
                 _expand_summary_table_rows(summary_slide, section_chunk)
                 replace_placeholders_everywhere(summary_slide, summary_data)
-                _replace_summary_table_rows(summary_slide, section_chunk)
+                _replace_summary_table_rows(summary_slide, section_chunk, index_offset=start)
                 replace_named_images_on_slide(summary_slide, summary_data)
                 slide_cursor += 1
 
@@ -648,7 +648,7 @@ def _expand_summary_table_rows(slide, section):
         anchor = new_row_el
 
 
-def _replace_summary_table_rows(slide, section):
+def _replace_summary_table_rows(slide, section, index_offset: int = 0):
     table = _find_summary_table(slide)
     if table is None:
         return
@@ -659,7 +659,7 @@ def _replace_summary_table_rows(slide, section):
     item_rows = rows[first_idx: first_idx + len(section.items)]
     if len(item_rows) < len(section.items):
         return
-    for display_index, (row, item) in enumerate(zip(item_rows, section.items), start=1):
+    for display_index, (row, item) in enumerate(zip(item_rows, section.items), start=1 + index_offset):
         item_total = item.quantity * item.unit_price
         row_data = {
             "item_display_index": str(display_index),
