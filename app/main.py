@@ -784,14 +784,16 @@ def _expand_installment_rows(slide, installment_rows: list, payment_data: dict):
     parcela_rows = all_schedule_rows[len(all_schedule_rows) - len(installment_rows):]
 
     for row, inst in zip(parcela_rows, installment_rows):
+        # installments_method vem do header (payments[1]), não de cada parcela individual
+        installments_method = _s(inst.method) or payment_data.get("installments_method", "")
         row_data = {
-            "payments_schedule":    _s(inst.date),
-            "installments_method":  _s(inst.method),
-            "installments_value":   (
+            "payments_schedule":   _s(inst.date),
+            "installments_method": installments_method,
+            "installments_value":  (
                 _format_currency(inst.value) if inst.value is not None else ""
             ),
-            # entry_value e entry_method não aparecem nas linhas de parcela
-            "entry_value":  "",
+            "entry_value":         "",
+            "entry_method":        "",
         }
         for cell in row.cells:
             if cell.text_frame is None:
