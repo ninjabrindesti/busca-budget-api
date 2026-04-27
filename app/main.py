@@ -92,10 +92,16 @@ class PaymentEntry(BaseModel):
     Representa uma linha de pagamento (entrada ou parcela).
 
     Convenção de uso na lista `proposal.payments`:
-      [0] → Entrada:        label="Entrada", method="PIX", date="27/04/2026", value=4000.0
-      [1] → Header parcela: label="Parcelamento", method="Boleto", plan="Boleto 4x"
-      [2..N] → Parcelas:    date="08/05/2026", value=1000.0
+      COM entrada:
+        [0] → Entrada:        label="Entrada", method="PIX", date="27/04/2026", value=4000.0
+        [1] → Header parcela: label="Parcelamento", method="Boleto", plan="Boleto 4x"
+        [2..N] → Parcelas:    date="08/05/2026", value=1000.0
 
+      SEM entrada:
+        [0] → Header parcela: label="Parcelamento", method="Boleto", plan="Boleto 4x"
+        [1..N] → Parcelas:    date="08/05/2026", value=1000.0
+
+    A detecção é feita por conteúdo (não por posição) via _is_entry_row().
     Campos vazios/None → célula em branco. Linhas sem nenhum dado são removidas do slide.
     """
     model_config = ConfigDict(extra="allow")
@@ -267,18 +273,70 @@ def _build_summary_data(proposal: Proposal, section: Section) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Detecção de entrada por conteúdo (fix: propostas sem entrada)
+# ---------------------------------------------------------------------------
+
+def _is_entry_row(p: PaymentEntry) -> bool:
+    """
+    Detecta por CONTEÚDO se um PaymentEntry representa uma entrada (down payment).
+
+    Uma entrada é identificada por qualquer um dos critérios:
+      - label contém "entrada" (case-insensitive)
+      - tem value definido E tem date definido E NÃO tem plan definido
+        (headers de parcelamento têm plan; entradas não têm)
+
+    Isso permite que o frontend envie payments sem entrada e o FastAPI
+    ainda identifique corretamente o header de parcelamento no índice 0.
+    """
+    if p is None:
+        return False
+    label = (p.label or "").strip().lower()
+    if "entrada" in label:
+        return True
+    if p.plan and p.plan.strip():
+        return False
+    if p.value is not None and p.date and p.date.strip():
+        return True
+    return False
+
+
+def _parse_payments(payments: list) -> tuple:
+    """
+    Separa a lista de payments em (entry, installment_header, installment_rows)
+    detectando por CONTEÚDO, não por posição.
+
+    Suporta os dois casos:
+      COM entrada:  [entrada, header_parcela, parcela1, parcela2, ...]
+      SEM entrada:  [header_parcela, parcela1, parcela2, ...]
+    """
+    if not payments:
+        return None, None, []
+
+    if _is_entry_row(payments[0]):
+        entry              = payments[0]
+        installment_header = payments[1] if len(payments) > 1 else None
+        installment_rows   = payments[2:] if len(payments) > 2 else []
+    else:
+        entry              = None
+        installment_header = payments[0]
+        installment_rows   = payments[1:] if len(payments) > 1 else []
+
+    return entry, installment_header, installment_rows
+
+
 def _build_payment_data(proposal: Proposal, section: Section) -> tuple[dict, list]:
     """
     Monta o dicionário de placeholders para o slide de pagamentos (slide 11).
 
     Retorna (data_dict, installment_rows) onde installment_rows são as parcelas
-    individuais (payments[2:]) que precisam ser expandidas na tabela.
+    individuais que precisam ser expandidas na tabela.
+
+    Detecta por CONTEÚDO (não por posição) se há entrada ou não, resolvendo
+    o bug onde propostas sem entrada perdiam a primeira parcela.
     """
     payments = proposal.payments or []
-
-    entry              = payments[0] if len(payments) > 0 else None
-    installment_header = payments[1] if len(payments) > 1 else None
-    installment_rows   = payments[2:]  if len(payments) > 2 else []
+    entry, installment_header, installment_rows = _parse_payments(payments)
 
     data = {**_build_summary_data(proposal, section)}
 
@@ -702,9 +760,12 @@ def _remove_empty_payment_rows(slide, proposal: Proposal):
     """
     Remove linhas da tabela de pagamentos que não têm dados.
 
+    Detecta por CONTEÚDO (não por posição) se há entrada, resolvendo
+    o bug onde propostas sem entrada removiam a linha errada.
+
     Regras:
-      - Linha com {{entry}} é removida se payments[0] não existe ou está vazio.
-      - Linha com {{installments}} é removida se payments[1] não existe ou está vazio.
+      - Linha com {{entry}} é removida se não há entrada detectada.
+      - Linha com {{installments}} é removida se não há header de parcelamento.
       - Linhas com {{payments_schedule}} são removidas se não há nenhum payment.
     """
     payments = proposal.payments or []
@@ -712,26 +773,22 @@ def _remove_empty_payment_rows(slide, proposal: Proposal):
     if table is None:
         return
 
-    entry              = payments[0] if len(payments) > 0 else None
-    installment_header = payments[1] if len(payments) > 1 else None
-    has_schedule       = len(payments) > 0  # ao menos a entrada tem data
+    entry, installment_header, _ = _parse_payments(payments)
+    has_schedule = len(payments) > 0
 
     rows_to_remove = []
     for row in table.rows:
         text = _row_text(row)
 
         if "{{entry}}" in text:
-            # Remove se entrada não tem nenhum dado relevante
             if not entry or not (entry.label or entry.method or entry.value is not None):
                 rows_to_remove.append(row._tr)
 
         elif "{{installments}}" in text:
-            # Remove se header de parcelamento está vazio
             if not installment_header or not (installment_header.label or installment_header.method):
                 rows_to_remove.append(row._tr)
 
         elif "{{payments_schedule}}" in text:
-            # Remove linhas template de schedule se não há dados
             if not has_schedule:
                 rows_to_remove.append(row._tr)
 
@@ -746,7 +803,7 @@ def _expand_installment_rows(slide, installment_rows: list, payment_data: dict):
     Expande as linhas de parcela no slide de pagamentos.
 
     Template (slide 11) tem duas linhas com {{payments_schedule}}:
-      Linha A (entrada):     {{payments_schedule}} {{entry_method}}       {{entry_value}}
+      Linha A (entrada):      {{payments_schedule}} {{entry_method}}       {{entry_value}}
       Linha B (parcelamento): {{payments_schedule}} {{installments_method}} {{installments_value}}
 
     Se houver mais de 1 parcela em installment_rows, a linha B é duplicada
@@ -784,7 +841,6 @@ def _expand_installment_rows(slide, installment_rows: list, payment_data: dict):
     parcela_rows = all_schedule_rows[len(all_schedule_rows) - len(installment_rows):]
 
     for row, inst in zip(parcela_rows, installment_rows):
-        # installments_method vem do header (payments[1]), não de cada parcela individual
         installments_method = _s(inst.method) or payment_data.get("installments_method", "")
         row_data = {
             "payments_schedule":   _s(inst.date),
