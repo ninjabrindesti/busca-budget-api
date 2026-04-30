@@ -702,7 +702,7 @@ def _delete_slide(prs: Presentation, slide_index: int):
     xml_slides.remove(slide_ids[slide_index])
 
     # Remove a relationship da presentation
-    del prs.part.part_related_by(rId)
+    prs.part.drop_rel(rId)
 
 
 # ---------------------------------------------------------------------------
