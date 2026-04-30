@@ -4,6 +4,10 @@ Sprint 1: contrato único de placeholders + payload legado/novo
 Sprint 2: motor central de replace (text frames, tabelas, multi-run)
 Sprint 3: schema de pagamentos flexível, paginação do slide de resumo (>5 itens),
           preenchimento do slide de pagamentos e remoção de linhas vazias.
+Sprint 4: merge automático dos slides de orçamento + pagamento quando itens <= ITEMS_MERGE_THRESHOLD.
+          Quando há poucos itens, os slides 10 e 11 são fundidos em um único slide (slide 10),
+          com a tabela de itens no topo e o bloco de pagamentos embutido abaixo — sem alterar
+          o backend nem o payload da API.
 """
 
 import io
@@ -44,6 +48,7 @@ SUMMARY_SLIDE_INDEX = 9   # Slide 10 (0-based) — tabela de itens
 PAYMENT_SLIDE_INDEX = 10  # Slide 11 (0-based) — resumo de pagamentos
 
 ITEMS_PER_SUMMARY_SLIDE = 5   # Máximo de itens por slide de resumo
+ITEMS_MERGE_THRESHOLD   = 3   # Itens <= este valor → slides 10 e 11 fundidos em um único slide
 
 
 # ---------------------------------------------------------------------------
@@ -280,14 +285,6 @@ def _build_summary_data(proposal: Proposal, section: Section) -> dict:
 def _is_entry_row(p: PaymentEntry) -> bool:
     """
     Detecta por CONTEÚDO se um PaymentEntry representa uma entrada (down payment).
-
-    Uma entrada é identificada por qualquer um dos critérios:
-      - label contém "entrada" (case-insensitive)
-      - tem value definido E tem date definido E NÃO tem plan definido
-        (headers de parcelamento têm plan; entradas não têm)
-
-    Isso permite que o frontend envie payments sem entrada e o FastAPI
-    ainda identifique corretamente o header de parcelamento no índice 0.
     """
     if p is None:
         return False
@@ -303,12 +300,7 @@ def _is_entry_row(p: PaymentEntry) -> bool:
 
 def _parse_payments(payments: list) -> tuple:
     """
-    Separa a lista de payments em (entry, installment_header, installment_rows)
-    detectando por CONTEÚDO, não por posição.
-
-    Suporta os dois casos:
-      COM entrada:  [entrada, header_parcela, parcela1, parcela2, ...]
-      SEM entrada:  [header_parcela, parcela1, parcela2, ...]
+    Separa a lista de payments em (entry, installment_header, installment_rows).
     """
     if not payments:
         return None, None, []
@@ -327,34 +319,24 @@ def _parse_payments(payments: list) -> tuple:
 
 def _build_payment_data(proposal: Proposal, section: Section) -> tuple[dict, list]:
     """
-    Monta o dicionário de placeholders para o slide de pagamentos (slide 11).
-
-    Retorna (data_dict, installment_rows) onde installment_rows são as parcelas
-    individuais que precisam ser expandidas na tabela.
-
-    Detecta por CONTEÚDO (não por posição) se há entrada ou não, resolvendo
-    o bug onde propostas sem entrada perdiam a primeira parcela.
+    Monta o dicionário de placeholders para o slide de pagamentos.
     """
     payments = proposal.payments or []
     entry, installment_header, installment_rows = _parse_payments(payments)
 
     data = {**_build_summary_data(proposal, section)}
 
-    # Linha de entrada
     data["entry"]        = _s(entry.label  if entry else "")
     data["entry_method"] = _s(entry.method if entry else "")
     data["entry_value"]  = (
         _format_currency(entry.value) if entry and entry.value is not None else ""
     )
-    # A 1ª ocorrência de {{payments_schedule}} mostra a data da entrada
     data["payments_schedule"] = _s(entry.date if entry else "")
 
-    # Linha header de parcelamento
     data["installments"]        = _s(installment_header.label  if installment_header else "")
     data["installments_method"] = _s(installment_header.method if installment_header else "")
     data["installments_plan"]   = _s(installment_header.plan   if installment_header else "")
 
-    # {{installments_value}} na linha template de parcelas
     data["installments_value"] = (
         _format_currency(installment_rows[0].value)
         if installment_rows and installment_rows[0].value is not None
@@ -431,6 +413,24 @@ def replace_placeholders_everywhere(slide, replacements: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Detecção de modo merge
+# ---------------------------------------------------------------------------
+
+def _should_merge_slides(sections: List[Section]) -> bool:
+    """
+    Retorna True se a proposta tem itens suficientemente poucos para
+    fundir os slides de orçamento e pagamento em um único slide.
+
+    Critério: total de itens em todas as seções <= ITEMS_MERGE_THRESHOLD.
+    Propostas com múltiplas seções NÃO fazem merge (cada seção tem seu próprio
+    par resumo+pagamento).
+    """
+    if len(sections) != 1:
+        return False
+    return len(sections[0].items) <= ITEMS_MERGE_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
 # Endpoint principal
 # ---------------------------------------------------------------------------
 
@@ -447,6 +447,8 @@ def generate_proposal(payload: GenerateRequest):
 
         with open(TEMPLATE_PATH, "rb") as f:
             pptx_bytes = f.read()
+
+        merge_mode = _should_merge_slides(payload.sections)
 
         # -------------------------------------------------------------------
         # 1. Calcular quantidade de slides necessários
@@ -548,20 +550,46 @@ def generate_proposal(payload: GenerateRequest):
                 replace_placeholders_everywhere(summary_slide, summary_data)
                 _replace_summary_table_rows(summary_slide, section_chunk, index_offset=start)
                 replace_named_images_on_slide(summary_slide, summary_data)
+
+                # ── MERGE MODE ──────────────────────────────────────────────
+                # Quando há poucos itens (seção única, ≤ ITEMS_MERGE_THRESHOLD),
+                # incorporamos o conteúdo do slide de pagamentos DIRETAMENTE
+                # neste slide de resumo e pulamos o slide de pagamentos original.
+                if merge_mode and page == 0:
+                    payment_data, installment_rows = _build_payment_data(
+                        payload.proposal, section
+                    )
+                    _merge_payment_into_summary_slide(
+                        summary_slide, payload.proposal, installment_rows, payment_data
+                    )
+                    replace_placeholders_everywhere(summary_slide, payment_data)
+
                 slide_cursor += 1
 
-        # Slide de pagamentos (slide 11 — sempre único, após todos os resumos)
+        # -------------------------------------------------------------------
+        # Slide de pagamentos (slide 11)
+        # Em merge_mode ele é exibido mas sem conteúdo de pagamento — removemos
+        # as formas de pagamento para evitar placeholders soltos, mas mantemos
+        # o slide na apresentação para não quebrar o índice dos slides finais.
+        # Melhor ainda: simplesmente o pulamos e removemos do output.
+        # -------------------------------------------------------------------
         if slide_cursor < len(prs.slides):
             payment_slide = prs.slides[slide_cursor]
-            payment_data, installment_rows = _build_payment_data(
-                payload.proposal,
-                payload.sections[-1],
-            )
-            _remove_empty_payment_rows(payment_slide, payload.proposal)
-            _expand_installment_rows(payment_slide, installment_rows, payment_data)
-            replace_placeholders_everywhere(payment_slide, payment_data)
-            replace_named_images_on_slide(payment_slide, payment_data)
-            slide_cursor += 1
+
+            if merge_mode:
+                # Remove o slide de pagamentos do output (já foi embutido no resumo)
+                _delete_slide(prs, slide_cursor)
+                # slide_cursor não avança — o próximo slide (contato) já está nesta posição
+            else:
+                payment_data, installment_rows = _build_payment_data(
+                    payload.proposal,
+                    payload.sections[-1],
+                )
+                _remove_empty_payment_rows(payment_slide, payload.proposal)
+                _expand_installment_rows(payment_slide, installment_rows, payment_data)
+                replace_placeholders_everywhere(payment_slide, payment_data)
+                replace_named_images_on_slide(payment_slide, payment_data)
+                slide_cursor += 1
 
         # Slide final (contato)
         last_slide = prs.slides[-1]
@@ -648,6 +676,79 @@ def _reorder_slides(pptx_bytes, sections, total_item_slides, summary_slide_count
                 if name not in written:
                     out_zf.writestr(name, zf.read(name))
         return out.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Deleção de slide via python-pptx (zip-level)
+# ---------------------------------------------------------------------------
+
+def _delete_slide(prs: Presentation, slide_index: int):
+    """
+    Remove um slide da apresentação pelo índice (0-based).
+    Opera diretamente no XML interno do python-pptx.
+    """
+    xml_slides = prs.slides._sldIdLst
+    # Lista de rId dos slides na ordem atual
+    slide_ids = list(xml_slides)
+    if slide_index >= len(slide_ids):
+        return
+
+    # rId do slide a remover
+    rId = slide_ids[slide_index].get(
+        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+    )
+
+    # Remove da lista de slides
+    xml_slides.remove(slide_ids[slide_index])
+
+    # Remove a relationship da presentation
+    prs.part.drop_rel(rId)
+
+
+# ---------------------------------------------------------------------------
+# Merge: copia shapes de pagamento para dentro do slide de resumo
+# ---------------------------------------------------------------------------
+
+def _merge_payment_into_summary_slide(
+    summary_slide,
+    proposal: Proposal,
+    installment_rows: list,
+    payment_data: dict,
+):
+    """
+    Incorpora o conteúdo do slide de pagamentos (slide 11 do template) no
+    slide de resumo (slide 10), copiando todas as shapes de pagamento.
+
+    Estratégia:
+    - Abre o template original para obter o slide 11 limpo.
+    - Copia cada shape do slide 11 para o slide 10.
+    - Aplica _remove_empty_payment_rows e _expand_installment_rows
+      diretamente nas shapes copiadas (operando no slide de resumo).
+
+    Obs: esta função modifica summary_slide in-place.
+    """
+    if not os.path.exists(TEMPLATE_PATH):
+        return
+
+    with open(TEMPLATE_PATH, "rb") as f:
+        template_bytes = f.read()
+
+    template_prs = Presentation(io.BytesIO(template_bytes))
+
+    # Slide 11 do template (índice 10 = PAYMENT_SLIDE_INDEX)
+    if PAYMENT_SLIDE_INDEX >= len(template_prs.slides):
+        return
+
+    payment_template_slide = template_prs.slides[PAYMENT_SLIDE_INDEX]
+
+    # Copia todas as shapes do slide de pagamento para o slide de resumo
+    for shape in payment_template_slide.shapes:
+        new_el = _deepcopy(shape._element)
+        summary_slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
+
+    # Agora opera no slide de resumo (que já tem as shapes de pagamento)
+    _remove_empty_payment_rows(summary_slide, proposal)
+    _expand_installment_rows(summary_slide, installment_rows, payment_data)
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +843,7 @@ def _replace_summary_table_rows(slide, section, index_offset: int = 0):
 # ---------------------------------------------------------------------------
 
 def _find_payment_table(slide):
-    """Retorna a tabela do slide 11 (identifica por conter placeholders de pagamento)."""
+    """Retorna a tabela do slide de pagamentos (identifica por placeholders)."""
     for shape in slide.shapes:
         if not getattr(shape, "has_table", False):
             continue
@@ -759,14 +860,6 @@ def _find_payment_table(slide):
 def _remove_empty_payment_rows(slide, proposal: Proposal):
     """
     Remove linhas da tabela de pagamentos que não têm dados.
-
-    Detecta por CONTEÚDO (não por posição) se há entrada, resolvendo
-    o bug onde propostas sem entrada removiam a linha errada.
-
-    Regras:
-      - Linha com {{entry}} é removida se não há entrada detectada.
-      - Linha com {{installments}} é removida se não há header de parcelamento.
-      - Linhas com {{payments_schedule}} são removidas se não há nenhum payment.
     """
     payments = proposal.payments or []
     table    = _find_payment_table(slide)
@@ -801,19 +894,11 @@ def _remove_empty_payment_rows(slide, proposal: Proposal):
 def _expand_installment_rows(slide, installment_rows: list, payment_data: dict):
     """
     Expande as linhas de parcela no slide de pagamentos.
-
-    Template (slide 11) tem duas linhas com {{payments_schedule}}:
-      Linha A (entrada):      {{payments_schedule}} {{entry_method}}       {{entry_value}}
-      Linha B (parcelamento): {{payments_schedule}} {{installments_method}} {{installments_value}}
-
-    Se houver mais de 1 parcela em installment_rows, a linha B é duplicada
-    e cada cópia recebe os dados da respectiva parcela.
     """
     table = _find_payment_table(slide)
     if table is None or not installment_rows:
         return
 
-    # Coleta linhas com payments_schedule (após possível remoção)
     schedule_rows = [
         row for row in table.rows
         if "{{payments_schedule}}" in _row_text(row)
@@ -821,19 +906,16 @@ def _expand_installment_rows(slide, installment_rows: list, payment_data: dict):
     if not schedule_rows:
         return
 
-    # Última linha de schedule = template de parcela
     installment_template_row = schedule_rows[-1]
     template_el = installment_template_row._tr
     parent      = template_el.getparent()
 
-    # Duplica para parcelas adicionais
     anchor = template_el
     for _ in installment_rows[1:]:
         new_row_el = _deepcopy(template_el)
         parent.insert(parent.index(anchor) + 1, new_row_el)
         anchor = new_row_el
 
-    # Recoleta após duplicação e substitui cada parcela
     all_schedule_rows = [
         row for row in table.rows
         if "{{payments_schedule}}" in _row_text(row)
